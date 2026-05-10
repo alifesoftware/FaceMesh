@@ -1,5 +1,5 @@
 # Core image pipeline design
-_Exported on 5/10/2026 at 01:16:32 PDT from Cursor (3.3.27)_
+_Exported on 5/10/2026 at 01:51:59 PDT from Cursor (3.3.27)_
 
 ---
 
@@ -3889,4 +3889,207 @@ output_path: /Users/gifty/.cursor/projects/Users-gifty-Development-FaceMesh/term
 </task>
 </system_notification>
 <user_query>Briefly inform the user about the task result and perform any follow-up actions (if needed).</user_query>
+
+---
+
+**Cursor**
+
+Just the prior logcat captures shutting down cleanly — no action needed. The two pending questions (title format + always-navigate) are still waiting for your call.
+
+---
+
+**User**
+
+First: Cursor session transcripts should be committed, and also Cursor plans and rules. Create a rule for that
+
+Second: Make Full Range Default both in code and in UI
+
+Third: Confirmed 1 and 2 for now.
+
+---
+
+**Cursor**
+
+Three tasks, three commits. Reading the rule skill first to make sure I follow your conventions:
+
+You already have `.cursor/rules/logging-verbosity.mdc` and `.cursor/plans/*.plan.md` committed, plus some `docs/cursor_*.md` transcripts. I had incorrectly been treating the recent untracked transcripts as "leave alone" when the convention is clearly to commit them.
+
+### Task 1 — create the rule
+
+Now commit the rule + the two pending untracked transcripts (applying the rule retroactively):
+
+### Task 2 — flip default to `FULL_RANGE`
+
+The Settings UI reads `defaultVariant` automatically so the SegmentedButton selection follows. Just need to update the subtitle copy that currently says "Default" on the wrong segment:
+
+All 71 tests pass with the new default — the existing `defaultVariant` test reads the constant indirectly so it auto-updated. Commit:
+
+### Task 3 — cluster-detail UX
+
+Now extend `HomeViewModel` with the cluster-gallery state. Let me see how `keepersBySession` works since I'll mirror that pattern:
+
+Find where Reset wipes state so I can clear the new cache there too:
+
+Also drop the cache entry when a cluster is deleted:
+
+Now strings + KeeperGalleryScreen generalisation:
+
+### Routes + nav handler
+
+### Make the cluster avatar tappable + wire HomeScreen
+
+Now make the inner Surface (the actual avatar circle) clickable:
+
+Update the preview helper:
+
+Now wire it through `HomeScreen`:
+
+Now propagate through `HomeBody` and the `Clustered/FilterReady/Matching` content composables (lines 386, 397/405/413, 487):
+
+Now update `ClusteredBody` to take + forward the new callback:
+
+Update the previews to pass the new callback:
+
+### Final wiring + build
+
+Tests passed (71 still green), but device disconnected after I killed adb earlier. Let me reconnect:
+
+Device is gone — probably needs to be unplugged/replugged or USB debugging re-authorised. I'll commit the cluster-gallery feature now and you can reconnect when ready:
+
+Per the new rule a fresh transcript also ended up untracked (`cursor_face_detection_alternative_options.md`) — folding it into this commit:
+
+Three of three landed:
+
+```
+0e51bc2  Add cluster gallery: tap a cluster avatar to see the photos in it
+c3a3267  Make BlazeFace full-range the default detector
+89ecd6a  Fix MODEL_BASE_URL: v2 release lives in alifesoftware/FaceMesh, not ModelZoo
+65b3056  Add rule: Cursor artefacts (transcripts, plans, rules) are committed
+```
+
+(plus the URL fix-up from earlier). Branch is now 6 commits ahead of `origin/main`.
+
+## Try it on the device
+
+When you're ready:
+
+1. **Reconnect** the Pixel via USB, accept "Allow USB debugging" again if prompted, then run:
+   ```bash
+   ./gradlew :app:installDebug
+   ```
+2. **Force stop the app** (or clear storage if you want a fresh model download).
+3. The Settings → Face detection model row should now show **Group / distant** as the selected (default) segment for any new install / cleared-storage state. Existing preference is preserved if you'd already toggled.
+4. **Tap a cluster's avatar circle** (not the checkbox in the corner) — you should land on the new "Cluster (N photos)" pager screen showing the photos that contributed faces to that cluster. Swipe between them. Back arrow returns to Home.
+5. **Verify the existing interactions still work**:
+   - Tap the checkbox overlay → toggles selection (for filter), gallery does *not* open.
+   - Swipe left on the avatar → delete confirmation dialog.
+
+Tell me what you see and whether the gallery contents match what you expect for "all photos of you" / "all photos of your wife." If you spot any photos in noise that should clearly have clustered, that's the eps-tightness conversation we had earlier — easy slider tweak.
+
+---
+
+**User**
+
+Device is back
+
+---
+
+**Cursor**
+
+Pixel back. Installing + restarting logcat:
+
+APK installed, logcat streaming. Two things to test on the phone — go in this order:
+
+### 1. Cluster gallery (the new drill-down)
+
+- Launch FaceMesh. Your existing 2 clusters should still be there (we didn't wipe storage).
+- **Tap directly on a cluster's avatar circle** (anywhere except the small checkbox in the corner).
+- You should land on a "Cluster (5 photos)" or similar screen — same swipeable pager you've seen for filter Keepers, but with all photos that contributed faces to that cluster.
+- Swipe between them to confirm they're the right people for that cluster.
+- Tap back arrow to return to Home.
+- Repeat for the second cluster.
+- **Confirm the existing interactions still work**:
+  - Tap the **checkbox** overlay → toggles selection (does NOT open the gallery).
+  - **Swipe left** on the avatar → delete confirmation (does NOT open the gallery).
+
+### 2. Full-range as new default (only if you haven't already toggled)
+
+- If you previously set the variant to FULL_RANGE in Settings, that's preserved — no test needed here.
+- If you want to verify the default-flip on a clean state: long-press FaceMesh icon → App info → Storage & cache → Clear storage → relaunch. The first-launch model download will go through, and Settings → Face detection model should show **Group / distant** as the selected segment.
+
+Tell me **"done"** when you're done poking at it (or **"crash"** / **"weird"** if anything looks off) and I'll pull the log + analyze. Especially want to know:
+
+- Does tapping the avatar feel responsive?
+- Are the photos in each cluster the right people?
+- Any photos in the gallery that *shouldn't* be there?
+
+---
+
+**User**
+
+I see the changes we made.
+
+However, there are very few photos for the clusters. But let's work on this tomorrow. My idea is we can reconstruct the same pipeline as Android in Python (without the configurations, bells and whistles), and then I will give two folders - one with my pictures, couple of group pictures with my wife, couple of group pictures with my dad, second with my wife's pictures, and some of her group pictures.
+
+Then we can test it on macbook and get some results
+
+---
+
+**Cursor**
+
+Sound plan. We already have ~70% of that — `tools/reference_embed.py --detect-and-align` is literally the on-device pipeline ported to Python. What's missing for tomorrow's experiment is the clustering step + a folder-based input mode + the full-range detector option in Python.
+
+Stopping the logcat capture and putting a wrap on the session:
+
+Everything's pushed already. One new untracked artefact appeared (per the rule, should commit):
+
+That's a 755-line manual whitepaper you started writing — different pattern from the auto-generated `docs/cursor_*.md` files the rule covers, so I'll leave it for you to commit when it's where you want it (or just `git add` it tomorrow and we keep going).
+
+## Where we ended the session
+
+Pushed to `origin/main`. **8 commits** this session:
+
+```
+0e51bc2  Add cluster gallery: tap a cluster avatar to see the photos in it
+c3a3267  Make BlazeFace full-range the default detector
+89ecd6a  Fix MODEL_BASE_URL: v2 release lives in alifesoftware/FaceMesh, not ModelZoo
+65b3056  Add rule: Cursor artefacts (transcripts, plans, rules) are committed
+31e1e0a  Add BlazeFace full-range detector with isolated impl + Settings toggle
+a057fdb  Add tools/dataset/ test fixtures + ignore .DS_Store
+f0445a4  FaceAligner: switch from 8-DOF perspective to 4-DOF similarity transform
+160d047  reference_embed: add similarity transform alignment + diagnose perspective bug
+1c69d9d  reference_embed: add --detect-and-align (mirror Android pipeline in Python)
+f402162  Add tools/reference_embed.py: GhostFaceNet RGB/BGR + precision parity tool
+```
+
+Net delta:
+- **Detector**: dual variant (short / full range), full-range default. **2× face recall** vs single-variant baseline on real photos.
+- **Aligner**: similarity-transform fix. ~3× same-person cosine improvement.
+- **UX**: pipeline tuning sliders + variant SegmentedButton + cluster-detail drill-down.
+- **Tooling**: `tools/reference_embed.py` is an offline reference for the detect→align→embed half of the pipeline.
+
+## Tomorrow's plan, concrete
+
+What we already have in `tools/reference_embed.py`:
+- ✓ EXIF transpose + downsample
+- ✓ BlazeFace short-range detection
+- ✓ ArcFace 4-point similarity warp (matches the Kotlin fix)
+- ✓ All 3 GhostFaceNet variants (FP32 ONNX, FP16 TFLite, W8A8 TFLite)
+- ✓ Per-image embedding output with channel-order parity check
+
+What we need to add (~1-2 hrs of work tomorrow):
+
+1. **Folder-based input** — `python tools/reference_embed.py --folder ./me ./wife ...` (recursively pick `*.jpg|*.png|*.heic`).
+2. **Full-range BlazeFace in Python** — port `BlazeFaceFullRangeAnchors` (single 48×48 grid) and the matching tensor-name lookup. ~80 lines, mirror of what we did in Kotlin.
+3. **DBSCAN clustering** — port the same algorithm we use on-device (cosine distance + the same `eps`/`minPts` defaults). ~40 lines.
+4. **Output**: per-cluster summary printed to stdout + an optional `--out-dir` that writes per-cluster subfolders (symlinks or JSON manifests pointing at the source paths) so you can visually verify "did all my photos go in cluster 0?"
+
+That gives us a complete offline reproducible pipeline. With your two folders we'll be able to:
+- Confirm the on-device clustering matches the Python ground-truth (if not, the bug is in how Android wires it up).
+- Sweep `eps` over `0.30, 0.35, 0.40, 0.45, 0.50` and see which value produces 2 clusters that capture the most photos correctly.
+- Produce a precision/recall number per setting — actual evidence-based threshold tuning.
+
+When you have the folders ready tomorrow, just point me at them and I'll build the additions, run them, and we'll iterate from there.
+
+Sleep well.
 

@@ -1,0 +1,58 @@
+---
+description: Keep docs/image_pipeline_whitepaper.md in sync when editing the image pipeline (decode, detect, filter, align, embed, cluster, match).
+globs: app/src/main/kotlin/com/alifesoftware/facemesh/ml/**, app/src/main/kotlin/com/alifesoftware/facemesh/media/BitmapDecoder.kt, app/src/main/kotlin/com/alifesoftware/facemesh/config/PipelineConfig.kt, app/src/main/kotlin/com/alifesoftware/facemesh/domain/ClusterifyUseCase.kt, app/src/main/kotlin/com/alifesoftware/facemesh/domain/FilterAgainstClustersUseCase.kt, models/manifest.json
+alwaysApply: false
+---
+
+# Keep the image-pipeline whitepaper in sync
+
+`docs/image_pipeline_whitepaper.md` is the canonical study guide for the
+detection → filter → align → embed → cluster → match pipeline. It includes
+sequence diagrams, flowcharts, model contracts, algorithm pseudocode, and a
+configuration cheat-sheet.
+
+When you change any file matched by this rule, **before ending the turn**,
+ask yourself: does my change invalidate any claim in the whitepaper?
+
+## Triggers — update the whitepaper when you change
+
+- **Stage flow / order**: e.g. add or remove a stage in `FaceProcessor.process`,
+  reorder filters in `FaceFilters.apply`, or alter the Clusterify / Filter
+  use-case orchestration.
+- **Model contract**: input size, anchor count, regressor stride, embedding
+  dim, manifest schema (`ModelManifest`, `models/manifest.json`).
+- **Algorithm choice**: switch detector variants, NMS strategy, alignment
+  fit (similarity vs perspective), clustering algorithm, distance metric.
+- **Configurable knobs**: any new / changed / renamed property in
+  `PipelineConfig` — including its default, range, or class
+  (MODEL CONTRACT / TUNABLE HEURISTIC / USER SETTING DEFAULT). Update the
+  cheat-sheet table in §10.
+- **Threading / memory**: dispatcher choice, buffer reuse rules, bitmap
+  recycle discipline.
+- **Persistence shape**: `ClusterEntity` / `ClusterImageEntity` columns,
+  centroid / embedding dim.
+
+## How to update
+
+1. Locate the affected section (the §-numbered ToC / `### N.M` headings
+   make this fast).
+2. Update the prose, the diagram (Mermaid), AND the cheat-sheet table if
+   relevant — the three views must agree.
+3. If your change spans multiple sections (e.g. a new stage), also revisit
+   §0 (at-a-glance flowchart), §13 (end-to-end sequences), §14 (file
+   index), and §15 (one-sentence-per-stage recap).
+
+## When NOT to update
+
+- Pure refactors (renames, log message tweaks, comment-only edits) that
+  don't change behaviour, contracts, or thresholds.
+- Bug fixes that restore documented behaviour rather than change it.
+
+If unsure, prefer to update — drift is the failure mode this rule exists to
+prevent.
+
+## Don't forget the commit
+
+Per `cursor-artifacts.mdc`, the whitepaper is committed alongside source
+changes. Fold whitepaper edits into the same work commit (or an immediate
+follow-up) so reviewers see the doc move in lockstep with the code.
