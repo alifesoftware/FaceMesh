@@ -74,6 +74,10 @@
     <string name="settings_source_manifest">manifest</string>
     <string name="settings_source_default">default</string>
 
+    <!-- Cluster gallery (drill-down from a cluster avatar on Home) -->
+    <string name="cluster_gallery_title_format">Cluster (%1$d photo)</string>
+    <string name="cluster_gallery_title_format_plural">Cluster (%1$d photos)</string>
+
     <!-- Settings: Face Detection Model section -->
     <string name="settings_section_detector">Face detection model</string>
     <string name="settings_detector_caption">Switch to full-range if photos with small or off-axis faces aren\'t clustering correctly. Change takes effect on the next Clusterify or Filter run.</string>

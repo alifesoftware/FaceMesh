@@ -75,6 +75,37 @@ class HomeViewModel(
     private val _keepers: MutableStateFlow<Map<String, List<Uri>>> = MutableStateFlow(emptyMap())
     val keepersBySession: StateFlow<Map<String, List<Uri>>> = _keepers.asStateFlow()
 
+    /**
+     * Per-cluster source-photo URI cache populated lazily when the user opens a cluster's
+     * gallery via [loadClusterImages]. Keyed by cluster id; value is the full ordered list
+     * of distinct source photos that contributed faces. Survives navigation (so back-and-
+     * forth between Home and ClusterGallery doesn't re-hit the DB) but is dropped on
+     * `clearAll` / Reset.
+     */
+    private val _clusterImages: MutableStateFlow<Map<String, List<Uri>>> = MutableStateFlow(emptyMap())
+    val clusterImagesById: StateFlow<Map<String, List<Uri>>> = _clusterImages.asStateFlow()
+
+    /**
+     * Loads the source photos for [clusterId] into [clusterImagesById]. Idempotent: skips
+     * the DB hit when the cache already has an entry. Logs counts for the trace.
+     */
+    fun loadClusterImages(clusterId: String) {
+        val repo = clusterRepository ?: run {
+            Log.w(TAG, "loadClusterImages: no repository wired; clusterId=$clusterId no-op")
+            return
+        }
+        if (_clusterImages.value.containsKey(clusterId)) {
+            Log.i(TAG, "loadClusterImages: id=$clusterId cache hit, skipping DB read")
+            return
+        }
+        viewModelScope.launch {
+            Log.i(TAG, "loadClusterImages: id=$clusterId DB read starting")
+            val uris = repo.loadImagesForCluster(clusterId)
+            _clusterImages.update { it + (clusterId to uris) }
+            Log.i(TAG, "loadClusterImages: id=$clusterId loaded ${uris.size} photo(s) into cache")
+        }
+    }
+
     private var pipelineJob: Job? = null
 
     fun handle(intent: HomeIntent) {
@@ -494,6 +525,7 @@ class HomeViewModel(
         Log.w(TAG, "onReset: user confirmed Reset; cancelling pipeline + clearing keepers + state")
         pipelineJob?.cancel()
         _keepers.value = emptyMap()
+        _clusterImages.value = emptyMap()
         transition("Reset", HomeUiState.Empty)
         viewModelScope.launch {
             // Best-effort wipe; if either is null (e.g. unit tests) just skip.
@@ -506,6 +538,7 @@ class HomeViewModel(
 
     private fun onDeleteCluster(id: String) {
         Log.i(TAG, "onDeleteCluster: id=$id")
+        _clusterImages.update { it - id }
         updateState("DeleteCluster") { s ->
             when (s) {
                 is HomeUiState.Clustered -> {

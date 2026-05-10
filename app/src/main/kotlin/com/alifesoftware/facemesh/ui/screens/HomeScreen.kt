@@ -84,6 +84,7 @@ private val FAB_BOTTOM_INSET = 96.dp
 fun HomeScreen(
     viewModel: HomeViewModel = viewModel(),
     onNavigateToKeepers: (String) -> Unit,
+    onNavigateToClusterGallery: (String) -> Unit,
     onNavigateToSettings: () -> Unit,
     onAddPhotosRequested: () -> Unit,
     onPickFilterPhotosRequested: () -> Unit,
@@ -171,6 +172,10 @@ fun HomeScreen(
             Log.i(SCREEN_TAG, "tap: ToggleCluster id=$it")
             viewModel.handle(HomeIntent.ToggleClusterChecked(it))
         },
+        onClusterTapped = { clusterId ->
+            Log.i(SCREEN_TAG, "tap: avatar -> ClusterGallery id=$clusterId")
+            onNavigateToClusterGallery(clusterId)
+        },
         onSwipeDeleteCluster = {
             Log.i(SCREEN_TAG, "swipe: DeleteCluster id=$it")
             viewModel.handle(HomeIntent.DeleteClusterConfirmed(it))
@@ -197,6 +202,7 @@ private fun HomeScaffold(
     onReset: () -> Unit,
     onSettings: () -> Unit,
     onToggleCluster: (String) -> Unit,
+    onClusterTapped: (String) -> Unit,
     onSwipeDeleteCluster: (String) -> Unit,
     onCancelProcessing: () -> Unit,
 ) {
@@ -231,6 +237,7 @@ private fun HomeScaffold(
                 state = state,
                 onAddPhotos = onAddPhotos,
                 onToggleCluster = onToggleCluster,
+                onClusterTapped = onClusterTapped,
                 onSwipeDeleteCluster = onSwipeDeleteCluster,
             )
 
@@ -383,6 +390,7 @@ private fun HomeBody(
     state: HomeUiState,
     onAddPhotos: () -> Unit,
     onToggleCluster: (String) -> Unit,
+    onClusterTapped: (String) -> Unit,
     onSwipeDeleteCluster: (String) -> Unit,
 ) {
     when (state) {
@@ -394,6 +402,7 @@ private fun HomeBody(
             filterPhotos = emptyList(),
             onAddPhotos = onAddPhotos,
             onToggleCluster = onToggleCluster,
+            onClusterTapped = onClusterTapped,
             onSwipeDeleteCluster = onSwipeDeleteCluster,
         )
         is HomeUiState.FilterReady -> ClusteredBody(
@@ -402,6 +411,7 @@ private fun HomeBody(
             filterPhotos = state.filterPhotos,
             onAddPhotos = onAddPhotos,
             onToggleCluster = onToggleCluster,
+            onClusterTapped = onClusterTapped,
             onSwipeDeleteCluster = onSwipeDeleteCluster,
         )
         is HomeUiState.Matching -> ClusteredBody(
@@ -410,6 +420,7 @@ private fun HomeBody(
             filterPhotos = state.filterPhotos,
             onAddPhotos = onAddPhotos,
             onToggleCluster = onToggleCluster,
+            onClusterTapped = onClusterTapped,
             onSwipeDeleteCluster = onSwipeDeleteCluster,
         )
         is HomeUiState.Processing -> Box(modifier = Modifier.fillMaxSize())
@@ -484,6 +495,7 @@ private fun ClusteredBody(
     filterPhotos: List<android.net.Uri>,
     onAddPhotos: () -> Unit,
     onToggleCluster: (String) -> Unit,
+    onClusterTapped: (String) -> Unit,
     onSwipeDeleteCluster: (String) -> Unit,
 ) {
     Column(modifier = Modifier.fillMaxSize()) {
@@ -504,6 +516,7 @@ private fun ClusteredBody(
             clusters = clusters,
             selectedIds = selectedIds,
             onToggleSelected = onToggleCluster,
+            onClusterTapped = onClusterTapped,
             onAddMore = onAddPhotos,
             onSwipeDelete = onSwipeDeleteCluster,
         )
@@ -520,7 +533,7 @@ private fun PreviewEmpty() = FaceMeshTheme {
         state = HomeUiState.Empty,
         snackbarHost = remember { SnackbarHostState() },
         onAddPhotos = {}, onPickFilterPhotos = {}, onClusterify = {}, onFilter = {},
-        onClear = {}, onReset = {}, onSettings = {}, onToggleCluster = {},
+        onClear = {}, onReset = {}, onSettings = {}, onToggleCluster = {}, onClusterTapped = {},
         onSwipeDeleteCluster = {}, onCancelProcessing = {},
     )
 }
@@ -533,7 +546,7 @@ private fun PreviewSelecting() = FaceMeshTheme {
         state = HomeUiState.Selecting(selectedPhotos = photos, recentFan = photos.takeLast(4).reversed()),
         snackbarHost = remember { SnackbarHostState() },
         onAddPhotos = {}, onPickFilterPhotos = {}, onClusterify = {}, onFilter = {},
-        onClear = {}, onReset = {}, onSettings = {}, onToggleCluster = {},
+        onClear = {}, onReset = {}, onSettings = {}, onToggleCluster = {}, onClusterTapped = {},
         onSwipeDeleteCluster = {}, onCancelProcessing = {},
     )
 }
@@ -545,7 +558,7 @@ private fun PreviewClustered() = FaceMeshTheme {
         state = HomeUiState.Clustered(clusters = MockData.mockClusters, selectedClusterIds = setOf("c1", "c3")),
         snackbarHost = remember { SnackbarHostState() },
         onAddPhotos = {}, onPickFilterPhotos = {}, onClusterify = {}, onFilter = {},
-        onClear = {}, onReset = {}, onSettings = {}, onToggleCluster = {},
+        onClear = {}, onReset = {}, onSettings = {}, onToggleCluster = {}, onClusterTapped = {},
         onSwipeDeleteCluster = {}, onCancelProcessing = {},
     )
 }
@@ -561,7 +574,7 @@ private fun PreviewFilterReady() = FaceMeshTheme {
         ),
         snackbarHost = remember { SnackbarHostState() },
         onAddPhotos = {}, onPickFilterPhotos = {}, onClusterify = {}, onFilter = {},
-        onClear = {}, onReset = {}, onSettings = {}, onToggleCluster = {},
+        onClear = {}, onReset = {}, onSettings = {}, onToggleCluster = {}, onClusterTapped = {},
         onSwipeDeleteCluster = {}, onCancelProcessing = {},
     )
 }

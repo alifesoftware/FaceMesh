@@ -1,6 +1,8 @@
 package com.alifesoftware.facemesh.ui.components
 
+import android.util.Log
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
@@ -56,6 +58,7 @@ fun ClusterRow(
     clusters: List<Cluster>,
     selectedIds: Set<String>,
     onToggleSelected: (String) -> Unit,
+    onClusterTapped: (String) -> Unit,
     onAddMore: () -> Unit,
     onSwipeDelete: (String) -> Unit,
     modifier: Modifier = Modifier,
@@ -72,6 +75,7 @@ fun ClusterRow(
                 index = clusters.indexOf(cluster),
                 total = clusters.size,
                 onCheckedChange = { onToggleSelected(cluster.id) },
+                onAvatarTapped = { onClusterTapped(cluster.id) },
                 onSwipeDelete = { onSwipeDelete(cluster.id) },
             )
         }
@@ -88,6 +92,7 @@ private fun SwipeableClusterAvatar(
     index: Int,
     total: Int,
     onCheckedChange: () -> Unit,
+    onAvatarTapped: () -> Unit,
     onSwipeDelete: () -> Unit,
 ) {
     var requestedDelete by remember(cluster.id) { mutableStateOf(false) }
@@ -143,6 +148,7 @@ private fun SwipeableClusterAvatar(
             cluster = cluster,
             checked = checked,
             onCheckedChange = onCheckedChange,
+            onAvatarTapped = onAvatarTapped,
             index = index,
             total = total,
         )
@@ -154,6 +160,7 @@ private fun ClusterAvatar(
     cluster: Cluster,
     checked: Boolean,
     onCheckedChange: () -> Unit,
+    onAvatarTapped: () -> Unit,
     index: Int,
     total: Int,
 ) {
@@ -176,7 +183,16 @@ private fun ClusterAvatar(
             color = MaterialTheme.colorScheme.surfaceVariant,
             modifier = Modifier
                 .size(AvatarSize)
-                .align(Alignment.Center),
+                .align(Alignment.Center)
+                // The avatar surface is the "view this cluster's contents" affordance. The
+                // overlaid Checkbox in TopStart owns its own click region, so tapping the
+                // checkbox does NOT bubble through to here -- selection vs. drill-down stay
+                // independent. Tapping anywhere else on the circle opens the gallery.
+                .clip(CircleShape)
+                .clickable {
+                    Log.i("FaceMesh.ClusterRow", "avatar tapped clusterId=${cluster.id}")
+                    onAvatarTapped()
+                },
         ) {
             AsyncImage(
                 model = cluster.representativeImageUri,
@@ -239,6 +255,7 @@ private fun ClusterRowPreview() = FaceMeshTheme {
         clusters = MockData.mockClusters,
         selectedIds = setOf("c1"),
         onToggleSelected = {},
+        onClusterTapped = {},
         onAddMore = {},
         onSwipeDelete = {},
     )

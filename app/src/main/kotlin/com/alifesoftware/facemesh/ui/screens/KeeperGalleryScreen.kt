@@ -45,6 +45,7 @@ private const val SCREEN_TAG: String = "FaceMesh.KeeperScreen"
 fun KeeperGalleryScreen(
     keepers: List<Uri>,
     onBack: () -> Unit,
+    title: String = stringResource(R.string.app_name),
 ) {
     DisposableEffect(keepers) {
         Log.i(SCREEN_TAG, "compose: entered with ${keepers.size} keeper(s); first=${keepers.firstOrNull()}")
@@ -53,7 +54,7 @@ fun KeeperGalleryScreen(
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
-                title = { Text(stringResource(R.string.app_name)) },
+                title = { Text(title) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(

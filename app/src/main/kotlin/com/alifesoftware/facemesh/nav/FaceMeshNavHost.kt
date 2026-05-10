@@ -6,6 +6,8 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavType
@@ -13,6 +15,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import com.alifesoftware.facemesh.R
 import com.alifesoftware.facemesh.ui.screens.HomeScreen
 import com.alifesoftware.facemesh.ui.screens.KeeperGalleryScreen
 import com.alifesoftware.facemesh.ui.screens.SettingsScreen
@@ -26,8 +29,10 @@ private const val TAG = "FaceMesh.Nav"
 object Routes {
     const val Home: String = "home"
     const val Keepers: String = "keepers/{sessionId}"
+    const val ClusterGallery: String = "cluster/{clusterId}"
     const val Settings: String = "settings"
     fun keepers(sessionId: String): String = "keepers/$sessionId"
+    fun clusterGallery(clusterId: String): String = "cluster/$clusterId"
 }
 
 @Composable
@@ -39,6 +44,7 @@ fun FaceMeshNavHost(
 ) {
     val nav = rememberNavController()
     val keepersBySession by homeVm.keepersBySession.collectAsStateWithLifecycle()
+    val clusterImagesById by homeVm.clusterImagesById.collectAsStateWithLifecycle()
 
     LaunchedEffect(nav) {
         Log.i(TAG, "host: NavController created startDestination=${Routes.Home}")
@@ -62,6 +68,11 @@ fun FaceMeshNavHost(
                 onNavigateToKeepers = { sessionId ->
                     Log.i(TAG, "Home -> Keepers(sessionId=$sessionId)")
                     nav.navigate(Routes.keepers(sessionId))
+                },
+                onNavigateToClusterGallery = { clusterId ->
+                    Log.i(TAG, "Home -> ClusterGallery(clusterId=$clusterId)")
+                    homeVm.loadClusterImages(clusterId)
+                    nav.navigate(Routes.clusterGallery(clusterId))
                 },
                 onNavigateToSettings = {
                     Log.i(TAG, "Home -> Settings")
@@ -88,6 +99,34 @@ fun FaceMeshNavHost(
                 onBack = {
                     Log.i(TAG, "Keepers <- back popping to Home")
                     homeVm.handle(HomeIntent.ReturnedFromKeepers)
+                    nav.popBackStack()
+                },
+            )
+        }
+        composable(
+            route = Routes.ClusterGallery,
+            arguments = listOf(navArgument("clusterId") { type = NavType.StringType }),
+        ) { entry ->
+            val clusterId = entry.arguments?.getString("clusterId").orEmpty()
+            val photos = remember(clusterId, clusterImagesById) {
+                clusterImagesById[clusterId].orEmpty()
+            }
+            DisposableEffect(clusterId) {
+                Log.i(TAG, "route enter: ClusterGallery clusterId=$clusterId items=${photos.size}")
+                onDispose { Log.i(TAG, "route exit:  ClusterGallery clusterId=$clusterId") }
+            }
+            // Title shows photo count: "Cluster (N photo[s])". For 0 we still navigate (the
+            // gallery shows the no-matches placeholder); UI consistency over special-casing.
+            val title = if (photos.size == 1) {
+                stringResource(R.string.cluster_gallery_title_format, photos.size)
+            } else {
+                stringResource(R.string.cluster_gallery_title_format_plural, photos.size)
+            }
+            KeeperGalleryScreen(
+                keepers = photos,
+                title = title,
+                onBack = {
+                    Log.i(TAG, "ClusterGallery <- back popping to Home")
                     nav.popBackStack()
                 },
             )

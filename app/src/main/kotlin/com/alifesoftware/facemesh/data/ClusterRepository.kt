@@ -78,6 +78,28 @@ class ClusterRepository(private val dao: ClusterDao) {
         Log.i(TAG, "saveCluster: id=${cluster.id} persisted in ${SystemClock.elapsedRealtime() - started}ms")
     }
 
+    /**
+     * Returns the distinct source-photo URIs that contributed faces to [clusterId], in
+     * insertion order. A single source photo can contribute multiple faces (group shots) and
+     * we de-duplicate so the gallery doesn't show the same photo twice.
+     *
+     * Empty list when the cluster id isn't known or has no images yet.
+     */
+    suspend fun loadImagesForCluster(clusterId: String): List<Uri> {
+        val started = SystemClock.elapsedRealtime()
+        val rows = dao.getImagesForCluster(clusterId)
+        // De-dupe by imageUri, preserving insertion order.
+        val unique = LinkedHashSet<String>(rows.size)
+        for (row in rows) unique += row.imageUri
+        val uris = unique.map(Uri::parse)
+        Log.i(
+            TAG,
+            "loadImagesForCluster: id=$clusterId rows=${rows.size} uniquePhotos=${uris.size} " +
+                "took=${SystemClock.elapsedRealtime() - started}ms",
+        )
+        return uris
+    }
+
     suspend fun deleteCluster(id: String) {
         val started = SystemClock.elapsedRealtime()
         Log.i(TAG, "deleteCluster: id=$id")
