@@ -2,6 +2,7 @@ package com.alifesoftware.facemesh.ml
 
 import android.graphics.PointF
 import android.graphics.RectF
+import com.alifesoftware.facemesh.config.PipelineConfig.Filters.SizeBandMode
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -62,16 +63,88 @@ class FaceFiltersTest {
     }
 
     @Test
-    fun `size outlier dropped when band fraction is tight`() {
+    fun `SYMMETRIC_BAND drops a tight-band size outlier`() {
         val a = face(0f, 0f, 100f, 100f)
         val b = face(0f, 0f, 100f, 100f)
         val tiny = face(0f, 0f, 30f, 30f)
         val out = FaceFilters.apply(
             listOf(a, b, tiny),
+            sizeBandMode = SizeBandMode.SYMMETRIC_BAND,
             sizeBandFraction = 0.3f,
         )
-        // tiny (30 wide) deviates by 70 from median 100; band 30 -> filtered out.
+        // tiny (30 wide) deviates by 70 from median 100; band = 0.3 * 100 = 30 -> filtered out.
         assertEquals(2, out.size)
         assertFalse(out.any { it.boundingBox.width() == 30f })
+    }
+
+    @Test
+    fun `DISABLED mode passes all faces regardless of size variance`() {
+        val tiny = face(0f, 0f, 10f, 10f)
+        val small = face(0f, 0f, 100f, 100f)
+        val huge = face(0f, 0f, 1000f, 1000f)
+        // Default mode is DISABLED in PipelineConfig.Filters.sizeBandMode.
+        val out = FaceFilters.apply(listOf(tiny, small, huge))
+        assertEquals("DISABLED mode must not cull on size", 3, out.size)
+    }
+
+    @Test
+    fun `EXTREME_OUTLIERS_ONLY drops absurdly small faces`() {
+        // Trio with one face at 5 px (way below 0.25 * median) plus two normal 100 px faces.
+        val absurd = face(0f, 0f, 5f, 5f)
+        val a = face(0f, 0f, 100f, 100f)
+        val b = face(0f, 0f, 100f, 100f)
+        val out = FaceFilters.apply(
+            listOf(absurd, a, b),
+            sizeBandMode = SizeBandMode.EXTREME_OUTLIERS_ONLY,
+            extremeOutlierMinRatio = 0.25f,
+            extremeOutlierMaxRatio = 4.0f,
+        )
+        assertEquals(2, out.size)
+        assertFalse(out.any { it.boundingBox.width() == 5f })
+    }
+
+    @Test
+    fun `EXTREME_OUTLIERS_ONLY drops absurdly large faces`() {
+        val a = face(0f, 0f, 100f, 100f)
+        val b = face(0f, 0f, 100f, 100f)
+        val giant = face(0f, 0f, 800f, 800f) // 8x median
+        val out = FaceFilters.apply(
+            listOf(a, b, giant),
+            sizeBandMode = SizeBandMode.EXTREME_OUTLIERS_ONLY,
+            extremeOutlierMinRatio = 0.25f,
+            extremeOutlierMaxRatio = 4.0f,
+        )
+        assertEquals(2, out.size)
+        assertFalse(out.any { it.boundingBox.width() == 800f })
+    }
+
+    @Test
+    fun `EXTREME_OUTLIERS_ONLY keeps reasonable size variance untouched`() {
+        // A near subject at 200 px coexisting with two distant subjects at 60 px - the exact
+        // case that motivated retiring the symmetric band as the default.
+        val near = face(0f, 0f, 200f, 200f)
+        val far1 = face(0f, 0f, 60f, 60f)
+        val far2 = face(0f, 0f, 60f, 60f)
+        val out = FaceFilters.apply(
+            listOf(near, far1, far2),
+            sizeBandMode = SizeBandMode.EXTREME_OUTLIERS_ONLY,
+            extremeOutlierMinRatio = 0.25f,
+            extremeOutlierMaxRatio = 4.0f,
+        )
+        // median = 60, band = [15..240]. All three (60, 60, 200) survive.
+        assertEquals(3, out.size)
+    }
+
+    @Test
+    fun `groupPhotoSizeBandSkipThreshold short-circuits regardless of mode`() {
+        // Four faces -> any active mode should be skipped to avoid culling group photos.
+        val faces = (0 until 4).map { face(0f, 0f, (it + 1) * 50f, (it + 1) * 50f) }
+        val out = FaceFilters.apply(
+            faces,
+            sizeBandMode = SizeBandMode.SYMMETRIC_BAND,
+            sizeBandFraction = 0.1f, // would be brutal if applied
+            groupPhotoSizeBandSkipThreshold = 4,
+        )
+        assertEquals("group-photo skip must short-circuit the active mode", 4, out.size)
     }
 }

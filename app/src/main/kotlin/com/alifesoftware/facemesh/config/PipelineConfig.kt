@@ -164,6 +164,91 @@ object PipelineConfig {
      * cull false positives without spending compute on alignment + embedding.
      */
     object Filters {
+
+        /**
+         * Strategy for the size-outlier stage. Selects between three behaviours that have
+         * different precision/recall trade-offs - see each enum value's KDoc.
+         *
+         *   - Class:    TUNABLE HEURISTIC
+         *   - Used by:  `FaceFilters.apply` (size-outlier stage dispatch)
+         *   - Default:  [SizeBandMode.DISABLED] - stage is off, the upstream confidence + eye/
+         *               width geometry filters plus DBSCAN are deemed sufficient; this is the
+         *               safest default because it can never re-introduce the "near + far face
+         *               in the same group photo get culled" regression.
+         */
+        val sizeBandMode: SizeBandMode = SizeBandMode.DISABLED
+
+        /**
+         * The size-outlier stage's three policies. All three respect the
+         * [groupPhotoSizeBandSkipThreshold] short-circuit (n >= threshold -> stage is skipped
+         * regardless of mode). All three are also no-ops when fewer than 2 faces survive
+         * geometry (no median to anchor on).
+         */
+        enum class SizeBandMode {
+            /**
+             * Stage is skipped entirely. Production default.
+             *
+             *   - Pro: zero risk of false negatives on group photos with mixed face sizes.
+             *   - Con: no guard against pathological size variance from rogue anchors;
+             *          relies entirely on the upstream filters + DBSCAN.
+             */
+            DISABLED,
+
+            /**
+             * Drop only faces whose width is wildly out of proportion with the median:
+             *   `width < extremeOutlierMinRatio * median` OR
+             *   `width > extremeOutlierMaxRatio * median`.
+             * Catches truly degenerate detections (a 5 px or a 800 px box among 100 px
+             * peers) while leaving normal portrait/duo/trio variance untouched.
+             *
+             *   - Pro: defensive guard against absurd outliers without re-introducing the
+             *          near+far symmetric cull.
+             *   - Con: another tunable to maintain; the chosen ratios should keep typical
+             *          near+far variance within bounds.
+             */
+            EXTREME_OUTLIERS_ONLY,
+
+            /**
+             * Original, symmetric `+/- sizeBandFraction * median` band cull. Drops any face
+             * whose width deviates from the median by more than the configured fraction.
+             *
+             *   - Pro: tightest false-positive precision for portrait/duo/trio frames.
+             *   - Con: with low fractions on n=2..3 frames, a near subject (200 px) and a
+             *          distant subject (60 px) cannot both survive - the documented regression
+             *          this stage caused on real-world group photos.
+             */
+            SYMMETRIC_BAND,
+        }
+
+        /**
+         * Lower bound (as a fraction of the median width) for [SizeBandMode.EXTREME_OUTLIERS_ONLY].
+         * Faces narrower than `extremeOutlierMinRatio * median` are dropped.
+         *
+         *   - Class:    TUNABLE HEURISTIC
+         *   - Range:    0.05..0.50
+         *   - Lower:    accepts more tiny faces; risk of letting noise-anchor false positives
+         *               survive the filter stage.
+         *   - Higher:   stricter; more typical-looking faces get culled.
+         *   - Why 0.25: a face less than a quarter of the median width is almost certainly
+         *               either a child far in the background (rare) or a non-face artefact.
+         */
+        const val extremeOutlierMinRatio: Float = 0.25f
+
+        /**
+         * Upper bound (as a fraction of the median width) for [SizeBandMode.EXTREME_OUTLIERS_ONLY].
+         * Faces wider than `extremeOutlierMaxRatio * median` are dropped.
+         *
+         *   - Class:    TUNABLE HEURISTIC
+         *   - Range:    2.0..8.0
+         *   - Lower:    aggressive on close-up subjects in group shots; risk of culling
+         *               legitimate "person right next to the camera" faces.
+         *   - Higher:   permissive; only catches truly absurd over-detections.
+         *   - Why 4.0:  someone four times wider than the rest is clearly closer to the
+         *               camera than the rest, but still plausibly the same subject - keep.
+         *               Above 4x and we're typically looking at a runaway anchor.
+         */
+        const val extremeOutlierMaxRatio: Float = 4.0f
+
         /**
          * Re-applied confidence floor on top of the decoder's [Detector.scoreThreshold]. Kept
          * aligned with the decoder so this stage does not silently undo the decoder's recall
@@ -202,32 +287,33 @@ object PipelineConfig {
         const val eyeWidthRatioMax: Float = 0.65f
 
         /**
-         * `+/- sizeBandFraction * medianWidth` is the size band a face must fall within to
-         * survive the size-outlier stage.
+         * `+/- sizeBandFraction * medianWidth` is the size band a face must fall within when
+         * [sizeBandMode] is [SizeBandMode.SYMMETRIC_BAND]. Ignored for other modes.
          *
          *   - Class:    TUNABLE HEURISTIC
-         *   - Used by:  `FaceFilters.apply` size-band stage (only when 2 <= n < [groupPhotoSizeBandSkipThreshold])
+         *   - Used by:  `FaceFilters.apply` (only when mode == SYMMETRIC_BAND)
          *   - Range:    0.30..3.00
          *   - Lower:    aggressively culls outliers; in 2-3-person frames a near subject
          *               (e.g. 200px) and a distant subject (60px) can no longer coexist.
          *   - Higher:   tolerates wider variance at the cost of letting more false-positive
          *               anchors through.
-         *   - Why 2.0:  widened from 1.0 -> 2.0 on 2026-05-09 to recover near+far pairs.
+         *   - Why 2.0:  widened from 1.0 -> 2.0 on 2026-05-09 to recover near+far pairs back
+         *               when this was the only available behaviour.
          */
         const val sizeBandFraction: Float = 2.0f
 
         /**
-         * When this many faces or more survive the geometry stage, the size-band stage is
-         * skipped entirely - the median is no longer a reliable "real face" anchor and we
-         * prefer to over-keep here and let DBSCAN sort it out downstream.
+         * When this many faces or more survive the geometry stage, the size-outlier stage is
+         * skipped entirely *regardless of [sizeBandMode]*. The median ceases to be a useful
+         * "real face" anchor in groups; let DBSCAN sort it out.
          *
          *   - Class:    TUNABLE HEURISTIC
-         *   - Used by:  `FaceFilters.apply` size-band stage
+         *   - Used by:  `FaceFilters.apply` (every mode)
          *   - Range:    3..10
          *   - Lower:    skips the stage on smaller groups (more recall on group photos, less
          *               precision overall).
-         *   - Higher:   keeps the size-band gate active for larger groups (more precision, but
-         *               group photos get pruned again).
+         *   - Higher:   keeps the active mode in effect for larger groups (more precision,
+         *               but group photos get pruned again).
          *   - Why 4:    a clean "trio = handle as portrait, quartet+ = group" cutoff.
          */
         const val groupPhotoSizeBandSkipThreshold: Int = 4
