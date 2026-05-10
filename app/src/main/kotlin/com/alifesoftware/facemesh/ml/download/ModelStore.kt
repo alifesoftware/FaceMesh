@@ -52,7 +52,9 @@ class ModelStore(context: Context) {
                     TAG,
                     "readManifest: parsed v${m.version} models=${m.models.map { it.name }} " +
                         "config={dbscanEps=${m.config.dbscanEps}, minPts=${m.config.dbscanMinPts}, " +
-                        "matchTh=${m.config.matchThreshold}, det=${m.config.detectorInput.toList()}, " +
+                        "matchTh=${m.config.matchThreshold}, " +
+                        "detSR=${m.config.shortRangeDetectorInput.toList()}, " +
+                        "detFR=${m.config.fullRangeDetectorInput.toList()}, " +
                         "emb=${m.config.embedderInput.toList()}}",
                 )
                 m

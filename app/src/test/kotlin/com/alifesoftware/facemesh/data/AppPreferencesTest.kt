@@ -1,6 +1,7 @@
 package com.alifesoftware.facemesh.data
 
 import com.alifesoftware.facemesh.config.PipelineConfig
+import com.alifesoftware.facemesh.config.PipelineConfig.Detector.DetectorVariant
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
@@ -106,6 +107,21 @@ class AppPreferencesTest {
         prefs.setDbscanEps(0.42f) // simulates a manifest re-download
         assertEquals(AppPreferences.Source.USER, prefs.dbscanEpsSource.first())
         assertEquals(0.55f, prefs.dbscanEps.first(), 1e-6f)
+    }
+
+    // -------- Detector variant --------
+
+    @Test
+    fun `detectorVariant defaults to PipelineConfig defaultVariant when unset`() = runTest {
+        assertEquals(PipelineConfig.Detector.defaultVariant, prefs.detectorVariant.first())
+    }
+
+    @Test
+    fun `setDetectorVariant round-trips through DataStore for both options`() = runTest {
+        prefs.setDetectorVariant(DetectorVariant.FULL_RANGE)
+        assertEquals(DetectorVariant.FULL_RANGE, prefs.detectorVariant.first())
+        prefs.setDetectorVariant(DetectorVariant.SHORT_RANGE)
+        assertEquals(DetectorVariant.SHORT_RANGE, prefs.detectorVariant.first())
     }
 
     @Test

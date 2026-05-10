@@ -12,6 +12,7 @@ import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.alifesoftware.facemesh.config.PipelineConfig
+import com.alifesoftware.facemesh.config.PipelineConfig.Detector.DetectorVariant
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
@@ -110,6 +111,25 @@ class AppPreferences(private val context: Context) {
         .observed("dynamicColorEnabled")
 
     /**
+     * Active BlazeFace detector variant. The clusterify and filter pipelines read this once
+     * per run and ask [com.alifesoftware.facemesh.ml.MlPipelineProvider] for the matching
+     * detector instance. Changing the value lazily tears down the previous detector on the
+     * next pipeline access.
+     *
+     * Default: [PipelineConfig.Detector.defaultVariant] (currently
+     * [DetectorVariant.SHORT_RANGE]) so existing installs see no behaviour change on upgrade.
+     */
+    val detectorVariant: Flow<DetectorVariant> = context.dataStore.data
+        .map { prefs ->
+            val raw = prefs[KEY_DETECTOR_VARIANT]
+            // Defensive parsing: an unknown stored value (older app version, manual edit)
+            // falls back to the config default rather than crashing.
+            raw?.let { runCatching { DetectorVariant.valueOf(it) }.getOrNull() }
+                ?: PipelineConfig.Detector.defaultVariant
+        }
+        .observed("detectorVariant")
+
+    /**
      * Manifest path: writes the manifest-supplied value into DataStore. Does NOT clear any
      * existing user override - the override always wins at read time.
      */
@@ -178,6 +198,11 @@ class AppPreferences(private val context: Context) {
         context.dataStore.edit { it[KEY_DYNAMIC_COLOR_ENABLED] = value }
     }
 
+    suspend fun setDetectorVariant(value: DetectorVariant) {
+        Log.i(TAG, "set detectorVariant=$value")
+        context.dataStore.edit { it[KEY_DETECTOR_VARIANT] = value.name }
+    }
+
     suspend fun clearAll() {
         Log.w(TAG, "clearAll: wiping ALL preferences (Reset flow)")
         context.dataStore.edit { it.clear() }
@@ -225,5 +250,6 @@ class AppPreferences(private val context: Context) {
         private val KEY_PENDING_FILTER_SESSION = stringPreferencesKey("pending_filter_session")
         private val KEY_GPU_FALLBACK_TOAST_SHOWN = booleanPreferencesKey("gpu_fallback_toast_shown")
         private val KEY_DYNAMIC_COLOR_ENABLED = booleanPreferencesKey("dynamic_color_enabled")
+        private val KEY_DETECTOR_VARIANT = stringPreferencesKey("detector_variant")
     }
 }

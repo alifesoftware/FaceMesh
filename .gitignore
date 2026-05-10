@@ -35,5 +35,8 @@ google-services.json
 
 .venv/
 
+# Kotlin compiler daemon scratch
+.kotlin/
+
 # macOS Finder metadata
 .DS_Store

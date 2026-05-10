@@ -20,6 +20,9 @@ import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -37,6 +40,8 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.alifesoftware.facemesh.R
+import com.alifesoftware.facemesh.config.PipelineConfig
+import com.alifesoftware.facemesh.config.PipelineConfig.Detector.DetectorVariant
 import com.alifesoftware.facemesh.data.AppPreferences
 import com.alifesoftware.facemesh.viewmodel.SettingsViewModel
 
@@ -66,6 +71,10 @@ fun SettingsScreen(
     )
     val matchThresholdModified by viewModel.matchThresholdHasUserOverride.collectAsStateWithLifecycle(
         initialValue = false,
+    )
+
+    val detectorVariant by viewModel.detectorVariant.collectAsStateWithLifecycle(
+        initialValue = PipelineConfig.Detector.defaultVariant,
     )
 
     DisposableEffect(Unit) {
@@ -173,6 +182,14 @@ fun SettingsScreen(
                 onValueChange = { viewModel.setMatchThresholdUserOverride(it) },
                 onReset = { viewModel.resetMatchThresholdUserOverride() },
             )
+
+            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+
+            // -------- Face detection model section --------
+            DetectorVariantSection(
+                current = detectorVariant,
+                onSelect = { viewModel.setDetectorVariant(it) },
+            )
         }
     }
 }
@@ -254,4 +271,52 @@ private fun snapToStep(raw: Float, bounds: SettingsViewModel.Bounds): Float {
     if (bounds.step <= 0f) return raw
     val snapped = bounds.min + ((raw - bounds.min) / bounds.step).toInt() * bounds.step
     return snapped.coerceIn(bounds.min, bounds.max)
+}
+
+@Composable
+private fun DetectorVariantSection(
+    current: DetectorVariant,
+    onSelect: (DetectorVariant) -> Unit,
+) {
+    Text(
+        text = stringResource(R.string.settings_section_detector),
+        style = MaterialTheme.typography.labelLarge,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+    )
+    Text(
+        text = stringResource(R.string.settings_detector_caption),
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+    )
+    val options: List<Pair<DetectorVariant, Pair<Int, Int>>> = listOf(
+        DetectorVariant.SHORT_RANGE to (R.string.settings_detector_short_range_label to R.string.settings_detector_short_range_subtitle),
+        DetectorVariant.FULL_RANGE  to (R.string.settings_detector_full_range_label  to R.string.settings_detector_full_range_subtitle),
+    )
+    SingleChoiceSegmentedButtonRow(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+    ) {
+        options.forEachIndexed { index, (variant, labels) ->
+            SegmentedButton(
+                selected = variant == current,
+                onClick = {
+                    Log.i(SCREEN_TAG, "segmented: detectorVariant -> $variant")
+                    onSelect(variant)
+                },
+                shape = SegmentedButtonDefaults.itemShape(index = index, count = options.size),
+            ) {
+                Text(stringResource(labels.first))
+            }
+        }
+    }
+    val activeSubtitleRes = options.first { it.first == current }.second.second
+    Text(
+        text = stringResource(activeSubtitleRes),
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+    )
 }

@@ -21,10 +21,12 @@ android {
 
         // SPEC OQ-1 resolved: models hosted as a GitHub Release in the alifesoftware/ModelZoo
         // repo. Trailing slash is required \u2014 ModelDownloadManager concatenates relative names.
+        // facemesh-v2 adds the BlazeFace full-range detector alongside the short-range one;
+        // see ModelManifest schema notes.
         buildConfigField(
             "String",
             "MODEL_BASE_URL",
-            "\"https://github.com/alifesoftware/ModelZoo/releases/download/facemesh-v1/\"",
+            "\"https://github.com/alifesoftware/ModelZoo/releases/download/facemesh-v2/\"",
         )
     }
 

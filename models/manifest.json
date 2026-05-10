@@ -1,11 +1,17 @@
 {
-  "version": 1,
+  "version": 2,
   "models": [
     {
       "type": "detector_blazeface_short_range",
       "name": "face_detection_short_range.tflite",
       "url": "face_detection_short_range.tflite",
       "sha256": "3bc182eb9f33925d9e58b5c8d59308a760f4adea8f282370e428c51212c26633"
+    },
+    {
+      "type": "detector_blazeface_full_range",
+      "name": "face_detection_full_range.tflite",
+      "url": "face_detection_full_range.tflite",
+      "sha256": "99bf9494d84f50acc6617d89873f71bf6635a841ea699c17cb3377f9507cfec3"
     },
     {
       "type": "embedder_ghostfacenet_fp16",
@@ -18,7 +24,8 @@
     "dbscan_eps": 0.35,
     "dbscan_min_pts": 2,
     "match_threshold": 0.65,
-    "detector_input": [128, 128],
+    "detector_short_range_input": [128, 128],
+    "detector_full_range_input": [192, 192],
     "embedder_input": [112, 112]
   }
 }

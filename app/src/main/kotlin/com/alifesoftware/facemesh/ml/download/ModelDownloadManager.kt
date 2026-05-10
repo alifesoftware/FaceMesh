@@ -219,7 +219,12 @@ class ModelDownloadManager(
         Log.i(TAG, "verifySha256: ${file.name} sha256 OK")
     }
 
-    /** Re-emit the manifest as JSON, useful when persisting the version we just verified. */
+    /**
+     * Re-emit the manifest as JSON in the v2 schema: emits both
+     * `detector_short_range_input` and `detector_full_range_input`. Older clients reading
+     * this output will still find the short-range key (their fallback path) and ignore the
+     * unknown full-range key.
+     */
     private fun manifestJson(manifest: ModelManifest): String {
         val sb = StringBuilder()
         sb.append('{')
@@ -240,8 +245,15 @@ class ModelDownloadManager(
             .append("\"dbscan_eps\":").append(cfg.dbscanEps).append(',')
             .append("\"dbscan_min_pts\":").append(cfg.dbscanMinPts).append(',')
             .append("\"match_threshold\":").append(cfg.matchThreshold).append(',')
-            .append("\"detector_input\":[").append(cfg.detectorInput[0]).append(',').append(cfg.detectorInput[1]).append("],")
-            .append("\"embedder_input\":[").append(cfg.embedderInput[0]).append(',').append(cfg.embedderInput[1]).append(']')
+            .append("\"detector_short_range_input\":[")
+            .append(cfg.shortRangeDetectorInput[0]).append(',').append(cfg.shortRangeDetectorInput[1])
+            .append("],")
+            .append("\"detector_full_range_input\":[")
+            .append(cfg.fullRangeDetectorInput[0]).append(',').append(cfg.fullRangeDetectorInput[1])
+            .append("],")
+            .append("\"embedder_input\":[")
+            .append(cfg.embedderInput[0]).append(',').append(cfg.embedderInput[1])
+            .append(']')
             .append('}')
         sb.append('}')
         return sb.toString()

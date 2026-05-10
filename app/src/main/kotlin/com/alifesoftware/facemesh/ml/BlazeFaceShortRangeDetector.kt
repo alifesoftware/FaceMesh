@@ -8,22 +8,26 @@ import android.os.SystemClock
 import android.util.Log
 import com.alifesoftware.facemesh.config.PipelineConfig
 import org.tensorflow.lite.InterpreterApi
-import java.io.Closeable
 import java.io.File
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
 /**
- * BlazeFace front-camera detector running on the [TfLiteRuntime].
+ * BlazeFace **short-range** detector (input 128 x 128, 896 anchors). Runs on
+ * [TfLiteRuntime].
+ *
+ * Companion to [BlazeFaceFullRangeDetector] - the two are deliberately not sharing code
+ * paths or buffers; see the [FaceDetector] interface for the user-facing surface and the
+ * `Detector` knobs in [PipelineConfig].
  *
  * Lifecycle: build once, reuse across many frames; call [close] when done.
  */
-class BlazeFaceDetector(
+class BlazeFaceShortRangeDetector(
     private val runtime: TfLiteRuntime,
     modelFile: File,
-    private val decoder: BlazeFaceDecoder = BlazeFaceDecoder(),
-    private val inputSize: Int = PipelineConfig.Detector.inputSize,
-) : Closeable {
+    private val decoder: BlazeFaceShortRangeDecoder = BlazeFaceShortRangeDecoder(),
+    private val inputSize: Int = PipelineConfig.Detector.ShortRange.inputSize,
+) : FaceDetector {
 
     private val interpreter: InterpreterApi = runtime.newInterpreter(runtime.loadModel(modelFile))
 
@@ -70,8 +74,8 @@ class BlazeFaceDetector(
         )
         Log.i(
             TAG,
-            "init: ready inputSize=${inputSize}x${inputSize}x3 anchors=${PipelineConfig.Detector.numAnchors} " +
-                "regStride=${PipelineConfig.Detector.regStride} delegate=${runtime.activeDelegate}",
+            "init: ready inputSize=${inputSize}x${inputSize}x3 anchors=${PipelineConfig.Detector.ShortRange.numAnchors} " +
+                "regStride=${PipelineConfig.Detector.ShortRange.regStride} delegate=${runtime.activeDelegate}",
         )
     }
 
@@ -80,19 +84,17 @@ class BlazeFaceDetector(
         .allocateDirect(inputSize * inputSize * 3 * Float.SIZE_BYTES)
         .order(ByteOrder.nativeOrder())
     private val regOutput: Array<Array<FloatArray>> = Array(1) {
-        Array(PipelineConfig.Detector.numAnchors) { FloatArray(PipelineConfig.Detector.regStride) }
+        Array(PipelineConfig.Detector.ShortRange.numAnchors) {
+            FloatArray(PipelineConfig.Detector.ShortRange.regStride)
+        }
     }
     private val clsOutput: Array<Array<FloatArray>> = Array(1) {
-        Array(PipelineConfig.Detector.numAnchors) { FloatArray(1) }
+        Array(PipelineConfig.Detector.ShortRange.numAnchors) { FloatArray(1) }
     }
     private val outputs: MutableMap<Int, Any> = mutableMapOf()
     private val resizePaint = Paint(Paint.FILTER_BITMAP_FLAG)
 
-    /**
-     * Run detection on [source] and return faces in source-pixel coordinates.
-     * Caller must NOT recycle [source] until this call returns.
-     */
-    fun detect(source: Bitmap): List<DetectedFace> {
+    override fun detect(source: Bitmap): List<DetectedFace> {
         Log.i(
             TAG,
             "detect: start source=${source.width}x${source.height} config=${source.config} " +
@@ -120,8 +122,8 @@ class BlazeFaceDetector(
         }
         val inferMs = SystemClock.elapsedRealtime() - inferStart
 
-        val numAnchors = PipelineConfig.Detector.numAnchors
-        val regStride = PipelineConfig.Detector.regStride
+        val numAnchors = PipelineConfig.Detector.ShortRange.numAnchors
+        val regStride = PipelineConfig.Detector.ShortRange.regStride
         val regs = FloatArray(numAnchors * regStride)
         for (i in 0 until numAnchors) {
             System.arraycopy(regOutput[0][i], 0, regs, i * regStride, regStride)
@@ -264,6 +266,6 @@ class BlazeFaceDetector(
     }
 
     companion object {
-        private const val TAG: String = "FaceMesh.Detector"
+        private const val TAG: String = "FaceMesh.Detector.SR"
     }
 }

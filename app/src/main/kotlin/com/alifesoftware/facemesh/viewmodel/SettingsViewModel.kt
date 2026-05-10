@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.alifesoftware.facemesh.config.PipelineConfig
+import com.alifesoftware.facemesh.config.PipelineConfig.Detector.DetectorVariant
 import com.alifesoftware.facemesh.data.AppPreferences
 import com.alifesoftware.facemesh.di.AppContainer
 import kotlinx.coroutines.flow.Flow
@@ -43,6 +44,9 @@ class SettingsViewModel(
 
     val matchThresholdHasUserOverride: Flow<Boolean> =
         preferences.matchThresholdUserOverride.map { it != null }
+
+    /** Active BlazeFace detector variant; drives the SegmentedButton selection in Settings. */
+    val detectorVariant: Flow<DetectorVariant> = preferences.detectorVariant
 
     /**
      * Slider bounds + step come straight from [PipelineConfig] so the UI is the single source
@@ -89,6 +93,17 @@ class SettingsViewModel(
     fun resetMatchThresholdUserOverride() {
         Log.i(TAG, "resetMatchThresholdUserOverride: clearing user override")
         viewModelScope.launch { preferences.setMatchThresholdUserOverride(null) }
+    }
+
+    /**
+     * Persists the user's detector-variant choice. The change takes effect on the next
+     * `clusterifyUseCase()` / `filterUseCase()` call - `MlPipelineProvider` reads the
+     * preference and tears down + rebuilds its detector if the value differs from the
+     * cached one.
+     */
+    fun setDetectorVariant(value: DetectorVariant) {
+        Log.i(TAG, "setDetectorVariant: user picked $value")
+        viewModelScope.launch { preferences.setDetectorVariant(value) }
     }
 
     /** Slider configuration shape for [SettingsScreen] consumption. */

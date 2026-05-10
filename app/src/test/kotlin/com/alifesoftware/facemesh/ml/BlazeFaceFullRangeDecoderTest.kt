@@ -8,15 +8,21 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
+/**
+ * Mirror of [BlazeFaceShortRangeDecoderTest] for the full-range variant. The tests are
+ * intentionally duplicated rather than parameterised because the two decoders are
+ * deliberately isolated implementations - if a future change drifts one decoder's math, we
+ * want the other's test to keep passing untouched.
+ */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [33])
-class BlazeFaceDecoderTest {
+class BlazeFaceFullRangeDecoderTest {
 
     @Test
     fun `sigmoid is monotonic and bounded`() {
-        val a = BlazeFaceDecoder.sigmoid(-100f)
-        val b = BlazeFaceDecoder.sigmoid(0f)
-        val c = BlazeFaceDecoder.sigmoid(100f)
+        val a = BlazeFaceFullRangeDecoder.sigmoid(-100f)
+        val b = BlazeFaceFullRangeDecoder.sigmoid(0f)
+        val c = BlazeFaceFullRangeDecoder.sigmoid(100f)
         assertTrue(a in 0f..1f)
         assertTrue(b in 0f..1f)
         assertTrue(c in 0f..1f)
@@ -26,14 +32,13 @@ class BlazeFaceDecoderTest {
 
     @Test
     fun `decode filters out low-confidence anchors`() {
-        // Synthetic single-anchor decoder so we control inputs precisely.
-        val anchors = arrayOf(BlazeFaceAnchors.Anchor(0.5f, 0.5f))
-        val decoder = BlazeFaceDecoder(
+        val anchors = arrayOf(BlazeFaceFullRangeAnchors.Anchor(0.5f, 0.5f))
+        val decoder = BlazeFaceFullRangeDecoder(
             inputSize = 100,
             anchors = anchors,
             scoreThreshold = 0.9f,
         )
-        val regs = FloatArray(PipelineConfig.Detector.regStride) // box centred, w/h = 0
+        val regs = FloatArray(PipelineConfig.Detector.FullRange.regStride)
         val logits = floatArrayOf(0f) // sigmoid(0) = 0.5 < 0.9
         val out = decoder.decode(regs, logits, sourceWidth = 100, sourceHeight = 100)
         assertEquals(0, out.size)
@@ -41,17 +46,16 @@ class BlazeFaceDecoderTest {
 
     @Test
     fun `decode emits a face when score exceeds threshold and box is non-degenerate`() {
-        val anchors = arrayOf(BlazeFaceAnchors.Anchor(0.5f, 0.5f))
-        val decoder = BlazeFaceDecoder(
+        val anchors = arrayOf(BlazeFaceFullRangeAnchors.Anchor(0.5f, 0.5f))
+        val decoder = BlazeFaceFullRangeDecoder(
             inputSize = 100,
             anchors = anchors,
             scoreThreshold = 0.5f,
         )
-        val regs = FloatArray(PipelineConfig.Detector.regStride).apply {
-            // Centre offset = 0, w = 60, h = 60, so the box is (20, 20, 80, 80) in input space.
+        val regs = FloatArray(PipelineConfig.Detector.FullRange.regStride).apply {
             this[2] = 60f
             this[3] = 60f
-            // Landmarks: right eye at (-10, -10) offset, left eye at (10, -10), etc.
+            // 6 landmark (x, y) pairs starting at index 4.
             this[4] = -10f; this[5] = -10f
             this[6] = 10f;  this[7] = -10f
             this[8] = 0f;   this[9] = 5f
@@ -67,28 +71,26 @@ class BlazeFaceDecoderTest {
         assertEquals(80f, face.boundingBox.right, 1e-3f)
         assertEquals(20f, face.boundingBox.top, 1e-3f)
         assertEquals(80f, face.boundingBox.bottom, 1e-3f)
-        // Eye distance derived from landmarks = sqrt(20^2 + 0^2) = 20
         assertEquals(20f, face.landmarks.eyeDistance(), 1e-3f)
     }
 
     @Test
     fun `decode performs NMS on heavily overlapping detections`() {
-        // Two anchors at the same centre; both regress to same box.
         val anchors = arrayOf(
-            BlazeFaceAnchors.Anchor(0.5f, 0.5f),
-            BlazeFaceAnchors.Anchor(0.5f, 0.5f),
+            BlazeFaceFullRangeAnchors.Anchor(0.5f, 0.5f),
+            BlazeFaceFullRangeAnchors.Anchor(0.5f, 0.5f),
         )
-        val decoder = BlazeFaceDecoder(
+        val decoder = BlazeFaceFullRangeDecoder(
             inputSize = 100,
             anchors = anchors,
             scoreThreshold = 0.5f,
             iouThreshold = 0.30f,
         )
-        val perAnchor = FloatArray(PipelineConfig.Detector.regStride).apply {
+        val perAnchor = FloatArray(PipelineConfig.Detector.FullRange.regStride).apply {
             this[2] = 60f
             this[3] = 60f
         }
-        val regs = perAnchor + perAnchor // both anchors emit the same box
+        val regs = perAnchor + perAnchor
         val logits = floatArrayOf(4f, 3f)
         val out = decoder.decode(regs, logits, sourceWidth = 100, sourceHeight = 100)
         assertEquals("NMS should fuse identical boxes", 1, out.size)

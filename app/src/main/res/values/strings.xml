@@ -73,4 +73,12 @@
     <string name="settings_source_user">modified</string>
     <string name="settings_source_manifest">manifest</string>
     <string name="settings_source_default">default</string>
+
+    <!-- Settings: Face Detection Model section -->
+    <string name="settings_section_detector">Face detection model</string>
+    <string name="settings_detector_caption">Switch to full-range if photos with small or off-axis faces aren\'t clustering correctly. Change takes effect on the next Clusterify or Filter run.</string>
+    <string name="settings_detector_short_range_label">Close-up</string>
+    <string name="settings_detector_short_range_subtitle">BlazeFace short-range, 128 x 128 input, ~230 KB. Best on selfie-distance frontal faces filling 30-80% of the frame. Default.</string>
+    <string name="settings_detector_full_range_label">Group / distant</string>
+    <string name="settings_detector_full_range_subtitle">BlazeFace full-range, 192 x 192 input, ~1.1 MB. Better on small or off-axis faces in group photos. Roughly 30-50%% slower per image but recovers many faces the close-up model misses.</string>
 </resources>

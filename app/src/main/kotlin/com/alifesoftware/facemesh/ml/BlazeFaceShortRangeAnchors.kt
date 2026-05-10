@@ -1,15 +1,19 @@
 package com.alifesoftware.facemesh.ml
 
 /**
- * Generates anchors for the front-camera BlazeFace 128x128 model.
+ * Generates anchors for the BlazeFace short-range 128x128 model.
  *
  * The model has two SSD prediction layers:
  *   \u2022 stride 8  on a 16\u00d716 grid \u2192 2 anchors per cell  = 512 anchors
  *   \u2022 stride 16 on an 8\u00d78 grid  \u2192 6 anchors per cell  = 384 anchors
  * Total: 896 anchors. Anchor (cx, cy) is the centre of the cell, normalised to [0,1].
  * Width and height are 1.0 (the regressor predicts displacements relative to anchor size).
+ *
+ * Companion to [BlazeFaceFullRangeAnchors], which uses a single 48x48 grid with one anchor
+ * per cell for the full-range 192x192 model. The two anchor tables are deliberately
+ * separate types so the code paths can't accidentally share state.
  */
-object BlazeFaceAnchors {
+object BlazeFaceShortRangeAnchors {
 
     data class Anchor(val cx: Float, val cy: Float)
 

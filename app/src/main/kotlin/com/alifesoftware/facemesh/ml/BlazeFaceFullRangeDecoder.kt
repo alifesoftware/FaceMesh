@@ -9,18 +9,20 @@ import kotlin.math.max
 import kotlin.math.min
 
 /**
- * Decodes BlazeFace raw outputs (regressors + classifications) into [DetectedFace]s.
+ * Decodes BlazeFace **full-range** raw outputs (regressors + classifications) into
+ * [DetectedFace]s. Companion to [BlazeFaceShortRangeDecoder] - the two are deliberately
+ * not sharing code; each owns its own anchor type and input-size constant.
  *
- * Regressor layout per anchor: 16 floats
- *   [0] dx, [1] dy        \u2014 box center offset in pixels (input space)
- *   [2] w,  [3] h         \u2014 box size in pixels (input space)
- *   [4..15]               \u2014 6 landmark (x,y) pairs in input space
+ * Regressor layout per anchor: 16 floats (same as short-range)
+ *   [0] dx, [1] dy        - box center offset in pixels (input space)
+ *   [2] w,  [3] h         - box size in pixels (input space)
+ *   [4..15]               - 6 landmark (x,y) pairs in input space
  *
  * Classifications per anchor: 1 logit (sigmoid'd to score).
  */
-class BlazeFaceDecoder(
-    private val inputSize: Int = PipelineConfig.Detector.inputSize,
-    private val anchors: Array<BlazeFaceAnchors.Anchor> = BlazeFaceAnchors.FRONT_128,
+class BlazeFaceFullRangeDecoder(
+    private val inputSize: Int = PipelineConfig.Detector.FullRange.inputSize,
+    private val anchors: Array<BlazeFaceFullRangeAnchors.Anchor> = BlazeFaceFullRangeAnchors.GRID_192,
     private val scoreThreshold: Float = PipelineConfig.Detector.scoreThreshold,
     private val iouThreshold: Float = PipelineConfig.Detector.nmsIouThreshold,
 ) {
@@ -37,8 +39,8 @@ class BlazeFaceDecoder(
         sourceWidth: Int,
         sourceHeight: Int,
     ): List<DetectedFace> {
-        require(regressors.size == anchors.size * PipelineConfig.Detector.regStride) {
-            "regressors size ${regressors.size} != ${anchors.size * PipelineConfig.Detector.regStride}"
+        require(regressors.size == anchors.size * PipelineConfig.Detector.FullRange.regStride) {
+            "regressors size ${regressors.size} != ${anchors.size * PipelineConfig.Detector.FullRange.regStride}"
         }
         require(classifications.size == anchors.size) {
             "classifications size ${classifications.size} != ${anchors.size}"
@@ -64,7 +66,7 @@ class BlazeFaceDecoder(
                 continue
             }
             val anchor = anchors[i]
-            val base = i * PipelineConfig.Detector.regStride
+            val base = i * PipelineConfig.Detector.FullRange.regStride
 
             // Box center is anchor center + offset/inputSize in normalised coords, then * size.
             val cx = (anchor.cx + regressors[base + 0] / inputSize) * inputSize
@@ -128,7 +130,7 @@ class BlazeFaceDecoder(
     private fun readLandmark(
         reg: FloatArray,
         offset: Int,
-        anchor: BlazeFaceAnchors.Anchor,
+        anchor: BlazeFaceFullRangeAnchors.Anchor,
         sx: Float,
         sy: Float,
         srcW: Int,
@@ -139,7 +141,7 @@ class BlazeFaceDecoder(
         return PointF(px.coerceIn(0f, srcW.toFloat()), py.coerceIn(0f, srcH.toFloat()))
     }
 
-    /** Two-pass IoU-based weighted NMS (per MediaPipe's default "weighted" suppression). */
+    /** Two-pass IoU-based weighted NMS (matches MediaPipe's default "weighted" suppression). */
     private fun weightedNms(
         candidates: List<DetectedFace>,
         iou: Float,
@@ -233,12 +235,12 @@ class BlazeFaceDecoder(
     }
 
     companion object {
-        private const val TAG: String = "FaceMesh.Decoder.Anchor"
+        private const val TAG: String = "FaceMesh.Decoder.FR"
+
         /**
-         * Numerically-stable sigmoid: keeps the divide in Double space so a small `exp(-x)`
-         * doesn't lose precision against the `1.0` term before the cast back to Float. For our
-         * logit ranges (typically -20..+20) the visible Float result is unchanged, but the
-         * version preserves precision if the threshold tuning ever moves into the tails.
+         * Numerically-stable sigmoid; same form as
+         * [BlazeFaceShortRangeDecoder.sigmoid] but kept duplicated rather than shared so the
+         * two decoders have zero coupling.
          */
         fun sigmoid(x: Float): Float = (1.0 / (1.0 + exp(-x.toDouble()))).toFloat()
     }

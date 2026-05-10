@@ -68,52 +68,48 @@ object PipelineConfig {
     // ---------------------------------------------------------------------------------------
 
     /**
-     * BlazeFace face-detection knobs ([com.alifesoftware.facemesh.ml.BlazeFaceDetector] +
-     * [com.alifesoftware.facemesh.ml.BlazeFaceDecoder]).
+     * BlazeFace face-detection knobs.
+     *
+     * Two detector variants are shipped, with totally isolated anchor tables, decoders, and
+     * input shapes - see [DetectorVariant], [ShortRange], and [FullRange]. The user picks
+     * one in Settings; the active variant is read from
+     * [com.alifesoftware.facemesh.data.AppPreferences.detectorVariant] at every clusterify
+     * / filter run via [com.alifesoftware.facemesh.ml.MlPipelineProvider].
+     *
+     * Score-related thresholds are deliberately shared across variants for now; if the two
+     * detectors' logit calibrations diverge, split into `ShortRange.scoreThreshold` and
+     * `FullRange.scoreThreshold` later.
      */
     object Detector {
-        /**
-         * Detector input edge size in pixels. The source bitmap is letterbox-resized into
-         * [inputSize] x [inputSize] x 3.
-         *
-         *   - Class:    MODEL CONTRACT (short-range BlazeFace ships at 128)
-         *   - Used by:  `BlazeFaceDetector` (input buffer + letterbox), `BlazeFaceDecoder`
-         *               (anchor unprojection)
-         *   - Note:     the ManifestConfig.detectorInput from the downloaded model bundle
-         *               overrides this at runtime via `MlPipelineProvider.ensureProcessor`.
-         *               Do NOT change this constant unless you are also swapping the model
-         *               file (e.g. to `face_detection_full_range_sparse.tflite` at 192).
-         */
-        const val inputSize: Int = 128
 
         /**
-         * Number of anchors emitted by the detector. Hard-coded by the SSD anchor calculator
-         * config used to generate [com.alifesoftware.facemesh.ml.BlazeFaceAnchors.FRONT_128].
-         *
-         *   - Class:    MODEL CONTRACT (anchor-table contract)
-         *   - Used by:  `BlazeFaceDetector` output buffer pre-allocation (init path asserts
-         *               this matches `BlazeFaceAnchors.FRONT_128.size`).
-         *   - Note:     the full-range BlazeFace bundle ships a different anchor count
-         *               (typically 2304); a model swap requires a matching anchor table and
-         *               a new value here.
+         * Which BlazeFace variant the pipeline runs. The `default*` is what a fresh install
+         * starts with; the user can switch at any time from Settings.
          */
-        const val numAnchors: Int = 896
+        enum class DetectorVariant {
+            /** BlazeFace short-range, 128x128, optimised for selfie-distance frontal faces. */
+            SHORT_RANGE,
+            /** BlazeFace full-range, 192x192, better on small / off-axis / group-photo faces. */
+            FULL_RANGE,
+        }
 
         /**
-         * Bytes per anchor in the regressor output: 4 box (dx, dy, w, h) + 12 landmark
-         * (6 x,y pairs) = 16 floats.
+         * Default variant for first launches. Existing installs preserve their saved choice.
          *
-         *   - Class:    MODEL CONTRACT
-         *   - Used by:  `BlazeFaceDecoder` regressor unpacking, `BlazeFaceDetector` output
-         *               buffer shape.
+         *   - Class:    USER SETTING DEFAULT
+         *   - Why SHORT_RANGE:  non-surprising upgrade path for users on the previous
+         *               (single-variant) build. Flipping to FULL_RANGE as the global default
+         *               is something to revisit once we have telemetry on detection-quality
+         *               improvements vs. inference-cost differences in production.
          */
-        const val regStride: Int = 16
+        val defaultVariant: DetectorVariant = DetectorVariant.SHORT_RANGE
 
         /**
-         * Minimum sigmoid score for a candidate anchor to survive the decoder pass.
+         * Minimum sigmoid score for a candidate anchor to survive the decoder pass. Shared
+         * across both variants today.
          *
          *   - Class:    TUNABLE HEURISTIC
-         *   - Used by:  `BlazeFaceDecoder.decode`, also re-applied at
+         *   - Used by:  short-range and full-range decoders, also re-applied at
          *               [Filters.confidenceThreshold] (kept aligned).
          *   - Range:    0.30..0.95
          *   - Lower:    recovers small / distant / blurry faces (their logits are squashed
@@ -128,29 +124,68 @@ object PipelineConfig {
 
         /**
          * Intersection-over-union threshold above which two candidate boxes are merged in
-         * MediaPipe-style weighted NMS.
+         * MediaPipe-style weighted NMS. Shared across variants.
          *
          *   - Class:    TUNABLE HEURISTIC
-         *   - Used by:  `BlazeFaceDecoder.weightedNms`
          *   - Range:    0.20..0.60
-         *   - Lower:    fewer duplicates; legitimate side-by-side faces (cheek-to-cheek group
-         *               shots, twins) can fuse into one detection.
-         *   - Higher:   tolerates near-overlap; risk of stacked duplicates from multiple
-         *               anchors firing on the same face surviving as separate detections.
+         *   - Lower:    fewer duplicates; legitimate side-by-side faces can fuse into one.
+         *   - Higher:   tolerates near-overlap; risk of stacked duplicates surviving.
          */
         const val nmsIouThreshold: Float = 0.30f
 
         /**
          * Worker thread count for the CPU/XNNPACK delegate path. Ignored when the GPU
          * delegate is active.
-         *
-         *   - Class:    TUNABLE HEURISTIC
-         *   - Used by:  `TfLiteRuntime.newInterpreter`
-         *   - Range:    1..available cores
-         *   - Lower:    less CPU contention with UI (useful on big.LITTLE phones).
-         *   - Higher:   faster inference up to the model's parallelism ceiling, more battery.
          */
         const val interpreterThreads: Int = 2
+
+        /**
+         * BlazeFace short-range model contract (the lightweight 128x128 detector trained
+         * for selfie-distance frontal faces).
+         *
+         * Each property is a MODEL CONTRACT value: changing it without re-exporting the
+         * `face_detection_short_range.tflite` file breaks inference. Values are validated
+         * by `BlazeFaceShortRangeDetector` at construction.
+         */
+        object ShortRange {
+            /** Detector input edge in pixels; source bitmap is letterboxed to [inputSize]^2 x 3. */
+            const val inputSize: Int = 128
+
+            /**
+             * Number of anchors emitted by the detector. Set by the SSD anchor calculator
+             * config used to generate
+             * [com.alifesoftware.facemesh.ml.BlazeFaceShortRangeAnchors.FRONT_128]:
+             * `16 x 16 x 2 + 8 x 8 x 6 = 896`.
+             */
+            const val numAnchors: Int = 896
+
+            /** Bytes per anchor in the regressor output: 4 box + 12 landmark (6 x,y pairs). */
+            const val regStride: Int = 16
+        }
+
+        /**
+         * BlazeFace full-range model contract (the heavier 192x192 detector trained for a
+         * wider face-size and pose distribution; better on group photos / distant faces).
+         *
+         * Each property is a MODEL CONTRACT value: changing it without re-exporting the
+         * `face_detection_full_range.tflite` file breaks inference. Values are validated
+         * by `BlazeFaceFullRangeDetector` at construction.
+         */
+        object FullRange {
+            /** Detector input edge in pixels; source bitmap is letterboxed to [inputSize]^2 x 3. */
+            const val inputSize: Int = 192
+
+            /**
+             * Number of anchors emitted by the detector. Set by the SSD anchor calculator
+             * config used to generate
+             * [com.alifesoftware.facemesh.ml.BlazeFaceFullRangeAnchors.GRID_192]:
+             * `48 x 48 x 1 = 2304` (single grid at stride 4, one anchor per cell).
+             */
+            const val numAnchors: Int = 2304
+
+            /** Bytes per anchor in the regressor output: 4 box + 12 landmark (6 x,y pairs). */
+            const val regStride: Int = 16
+        }
     }
 
     // ---------------------------------------------------------------------------------------

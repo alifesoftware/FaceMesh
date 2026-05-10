@@ -20,7 +20,7 @@ import kotlin.math.max
  */
 class FaceProcessor(
     private val resolver: ContentResolver,
-    private val detector: BlazeFaceDetector,
+    private val detector: FaceDetector,
     private val aligner: FaceAligner,
     private val embedder: FaceEmbedder,
 ) {
