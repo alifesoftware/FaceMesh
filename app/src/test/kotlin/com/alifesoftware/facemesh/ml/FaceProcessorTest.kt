@@ -3,7 +3,9 @@ package com.alifesoftware.facemesh.ml
 import android.graphics.Bitmap
 import android.graphics.RectF
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNotSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -79,5 +81,28 @@ class FaceProcessorTest {
         val bbox = RectF(0f, 0f, 1f, 1f)
         val out = FaceProcessor.cropDisplayThumbnail(source, bbox, paddingFraction = 0.30f, maxOutputDim = 256)
         assertEquals(null, out)
+    }
+
+    /**
+     * Regression for the use-after-free corner case: when the padded square crop covers the
+     * entire source bitmap, `Bitmap.createBitmap(source, 0, 0, w, h)` returns the source
+     * itself per the documented Android contract. FaceProcessor.process recycles the source
+     * in finally{}, which would invalidate any FaceRecord.displayCrop that aliased it. The
+     * defensive copy in cropDisplayThumbnail must guarantee the returned bitmap survives.
+     */
+    @Test
+    fun `cropDisplayThumbnail returns a bitmap that is not the source even when crop covers everything`() {
+        val source = blankBitmap(300, 300)
+        val bbox = RectF(50f, 50f, 250f, 250f) // 200 px face -> padded 400 -> clamped to 300x300
+        val out = FaceProcessor.cropDisplayThumbnail(source, bbox, paddingFraction = 0.50f, maxOutputDim = 512)
+        assertNotNull(out)
+        // Critical: must be a *different* Bitmap object so recycling source does not kill it.
+        assertNotSame("displayCrop must not alias source bitmap", source, out)
+        // Sanity: shape unchanged (no rescale because 300 <= 512).
+        assertEquals(300, out!!.width)
+        assertEquals(300, out.height)
+        // And recycling source must NOT recycle the returned crop.
+        source.recycle()
+        assertFalse("displayCrop must remain valid after source.recycle()", out.isRecycled)
     }
 }

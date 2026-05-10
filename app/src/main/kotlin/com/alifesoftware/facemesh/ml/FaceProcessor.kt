@@ -202,7 +202,22 @@ class FaceProcessor(
 
             val w = (right - left).toInt().coerceAtLeast(1)
             val h = (bottom - top).toInt().coerceAtLeast(1)
-            val cropped = Bitmap.createBitmap(source, left.toInt(), top.toInt(), w, h)
+            // Bitmap.createBitmap(source, x, y, w, h) returns the source bitmap itself when
+            // (x,y,w,h) covers the entire source - documented Android contract. That aliasing
+            // is unsafe here because FaceProcessor.process recycles the source in finally{},
+            // which would invalidate any FaceRecord.displayCrop holding the alias. Force a
+            // copy so the returned bitmap survives the source's recycle.
+            val rawCropped = Bitmap.createBitmap(source, left.toInt(), top.toInt(), w, h)
+            val cropped = if (rawCropped === source) {
+                Log.i(
+                    TAG,
+                    "cropDisplayThumbnail: rawCropped aliases source (whole-image crop); " +
+                        "forcing defensive copy to keep displayCrop independent of source recycle",
+                )
+                rawCropped.copy(source.config ?: Bitmap.Config.ARGB_8888, /* isMutable = */ false)
+            } else {
+                rawCropped
+            }
 
             // Down-scale if the natural crop is bigger than the on-disk cap.
             val maxDim = max(w, h)

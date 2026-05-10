@@ -6,8 +6,11 @@ import kotlin.math.sqrt
 /**
  * Hand-rolled vector math for face embeddings (SPEC \u00a76.4 / \u00a76.6).
  *
- * Pure-Kotlin, allocation-free where it matters. Inputs are expected to be 128-dimensional but
- * the helpers work for any equal-length pair.
+ * Pure-Kotlin, allocation-free where it matters. Inputs are
+ * [com.alifesoftware.facemesh.config.PipelineConfig.Embedder.embeddingDim]-dimensional in
+ * production (currently 512 for GhostFaceNet-V1; the SPEC's original "128-d" reference was
+ * for the MobileFaceNet baseline that has since been replaced) but the helpers work for any
+ * equal-length pair.
  */
 object EmbeddingMath {
 
