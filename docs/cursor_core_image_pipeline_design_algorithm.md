@@ -1,5 +1,5 @@
 # Core image pipeline design
-_Exported on 5/10/2026 at 01:51:59 PDT from Cursor (3.3.27)_
+_Exported on 5/10/2026 at 13:48:33 PDT from Cursor (3.3.27)_
 
 ---
 
@@ -4092,4 +4092,1263 @@ That gives us a complete offline reproducible pipeline. With your two folders we
 When you have the folders ready tomorrow, just point me at them and I'll build the additions, run them, and we'll iterate from there.
 
 Sleep well.
+
+---
+
+**User**
+
+I am going to bed, but why don't you build this python pipeline to test our end to end stuff on macbook? I will play with it when i wake up
+
+---
+
+**Cursor**
+
+On it. I'll build a self-contained `tools/reference_pipeline.py` that does the full end-to-end pipeline (detection → alignment → embedding → DBSCAN clustering) on folders of photos, mirrors the Android defaults exactly, and produces both human-readable output and a machine-readable JSON report.
+
+### Step 1 — Add full-range BlazeFace to `reference_embed.py`
+
+Now generalise the runner and `detect_and_align_face` to dispatch on variant:
+
+Now update `detect_and_align_face` to plumb the variant through:
+
+Add the `--detector-variant` flag to the existing CLI surface:
+
+### Step 2 — Build the new `tools/reference_pipeline.py`
+
+### Step 5 — Smoke test on `tools/dataset/`
+
+End-to-end pipeline works. Let me verify the output bundle structure:
+
+Output bundle is clean and structured. Now let me run a couple more sanity checks: short-range variant + tighter eps:
+
+Let me also sanity-check the loose-eps sweep behaviour (and confirm no regression from my reference_embed.py changes):
+
+Confirm I didn't break the original `reference_embed.py` (single-image embed mode):
+
+Clean. Now also verify a corner-case: an empty folder shouldn't crash:
+
+### Step 6 — Commit
+
+I'll only commit my new pipeline work — the other modified files are unrelated WIP from your earlier sessions, I'll leave those alone.
+
+All done. Sleep well — here's what's waiting for you when you wake up.
+
+## What got built
+
+`tools/reference_pipeline.py` is a self-contained end-to-end driver that mirrors the Android pipeline exactly:
+
+```
+folders --> EXIF + downsample --> BlazeFace (full or short range)
+         --> 4-point similarity warp to 112x112
+         --> GhostFaceNet FP16 (RGB, [-1,1] norm)
+         --> DBSCAN over cosine distance
+         --> per-cluster summary + ground-truth folder breakdown
+```
+
+All defaults match `PipelineConfig` as of this morning's commits: full-range BlazeFace, similarity alignment, FP16 embedder, eps=0.35, minPts=2.
+
+## How to play with it
+
+```bash
+source .venv/bin/activate
+
+python tools/reference_pipeline.py \
+    --folder ~/photos/me \
+    --folder ~/photos/wife \
+    --out ./pipeline_out
+```
+
+You can pass any number of `--folder` flags. Each folder's basename becomes the ground-truth label, or you can override with matching `--label` flags.
+
+Useful knobs (all optional):
+
+- `--detector-variant short_range|full_range` — defaults to `full_range`, same as the device.
+- `--alignment-mode similarity|perspective` — defaults to `similarity`. Use `perspective` to reproduce the bug we fixed on Friday and confirm it.
+- `--embedder fp32|fp16|w8a8` — defaults to `fp16`.
+- `--eps 0.35` / `--min-pts 2` — DBSCAN knobs. Sweep these against your photo set.
+- `--out DIR` — writes per-cluster subdirs of symlinks, all aligned 112x112 PNGs, and `report.json` with full provenance + per-cluster cosine-similarity stats.
+- `--quiet` to suppress per-image progress lines.
+
+## Smoke test results (`tools/dataset/`)
+
+Split into two folders (`me` = 5 Virat photos, `others` = SRK + Arshdeep), full-range, defaults:
+
+```
+cluster_0   size=  4  by-folder=me:4         sim[mean/min/max]=0.794/0.695/0.948
+cluster_1   size=  2  by-folder=others:2     (Arshdeep)
+cluster_2   size=  2  by-folder=others:2     (SRK)
+noise: 1   virat00.jpg
+```
+
+At `--eps 0.5` virat00 joins cluster_0 → 3 perfect clusters, 0 noise. At `--detector-variant short_range` Arshdeep loses both members to noise — same behaviour we'd already seen on-device, now reproducible offline in 4 seconds.
+
+## What I left alone deliberately
+
+- The `app/src/main/kotlin/...` modifications in your WIP weren't related to the Python pipeline and aren't fully done, so I didn't sweep them into this commit. They'll still be in your working tree exactly as you left them.
+- `tools/reference_embed.py` did get refactored to share variant-aware BlazeFace code with the new pipeline, but the existing CLI surface is preserved (the existing `--detect-and-align` mode still works identically; new flag is `--detector-variant`).
+
+Commit: `bc78b46 Add reference_pipeline.py: end-to-end clustering driver for offline runs`
+
+Related session: [Build Python end-to-end pipeline](000f7c6d-5174-44a6-b6c4-3f5296fb0c28).
+
+---
+
+**User**
+
+<timestamp>Sunday, May 10, 2026, 2:10 AM (UTC-7)</timestamp>
+<system_notification>
+The following task has finished. If you were already aware, ignore this notification and do not restate prior responses.
+
+<task>
+kind: shell
+status: error
+task_id: 802344
+title: Stream FaceMesh logs (incl. ClusterRow tap events)
+detail: exit_code=255
+output_path: /Users/gifty/.cursor/projects/Users-gifty-Development-FaceMesh/terminals/802344.txt
+</task>
+</system_notification>
+<user_query>Briefly inform the user about the task result and perform any follow-up actions (if needed).</user_query>
+
+---
+
+**Cursor**
+
+That's an old `adb logcat` stream from yesterday's testing session — it ran for ~16 minutes, then exited 255 (most likely the device disconnected or `adb` was reset). Nothing was captured to `/tmp/facemesh_test.log` and it isn't related to the Python pipeline work I just finished.
+
+No follow-up needed — the file's already gone (we cleaned `/tmp` earlier) and there's nothing in the output to act on. The pipeline commit (`bc78b46`) is in place and ready for you in the morning.
+
+---
+
+**User**
+
+ python tools/reference_pipeline.py --folder /Users/gifty/Downloads/anuj --folder /Users/gifty/Downloads/kary --out ./clusters
+/Users/gifty/Development/FaceMesh/.venv/lib/python3.9/site-packages/urllib3/__init__.py:35: NotOpenSSLWarning: urllib3 v2 only supports OpenSSL 1.1.1+, currently the 'ssl' module is compiled with 'LibreSSL 2.8.3'. See: https://github.com/urllib3/urllib3/issues/3020
+  warnings.warn(
+# Building FP16 embedder
+/Users/gifty/Development/FaceMesh/.venv/lib/python3.9/site-packages/tensorflow/lite/python/interpreter.py:457: UserWarning:     Warning: tf.lite.Interpreter is deprecated and is scheduled for deletion in
+    TF 2.20. Please use the LiteRT interpreter from the ai_edge_litert package.
+    See the [migration guide](https://ai.google.dev/edge/litert/migration)
+    for details.
+    
+  warnings.warn(_INTERPRETER_DELETION_WARNING)
+INFO: Created TensorFlow Lite XNNPACK delegate for CPU.
+   built FP16_TFLITE
+# 63 image(s) across 2 folder(s); detector=full_range alignment=similarity eps=0.35 minPts=2
+
+   + [1/63] anuj/20250526202235904.jpg -> 1 face(s) (37ms)
+   + [2/63] anuj/AirBrush_20250701080658.jpg -> 1 face(s) (22ms)
+   + [3/63] anuj/IMG-20241125-WA0008.jpg -> 2 face(s) (42ms)
+   + [4/63] anuj/IMG-20241125-WA0028.jpg -> 2 face(s) (39ms)
+   + [5/63] anuj/IMG_5983.JPG -> 2 face(s) (106ms)
+   + [6/63] anuj/IMG_5984.JPG -> 2 face(s) (96ms)
+   + [7/63] anuj/PXL_20221112_205831153.jpg -> 2 face(s) (75ms)
+   + [8/63] anuj/PXL_20221213_062839047.jpg -> 1 face(s) (70ms)
+   + [9/63] anuj/PXL_20230818_184459973.jpg -> 1 face(s) (75ms)
+   + [10/63] anuj/PXL_20230818_184727230.MP.jpg -> 1 face(s) (78ms)
+   + [11/63] anuj/PXL_20240205_153023234.jpg -> 2 face(s) (67ms)
+   + [12/63] anuj/PXL_20240808_145412369.jpg -> 1 face(s) (63ms)
+   + [13/63] anuj/PXL_20240929_204429198.MP.jpg -> 1 face(s) (69ms)
+   + [14/63] anuj/PXL_20240929_204430516.MP.jpg -> 1 face(s) (69ms)
+   + [15/63] anuj/PXL_20241214_025323469.jpg -> 1 face(s) (72ms)
+   + [16/63] anuj/PXL_20250228_041424576.jpg -> 1 face(s) (63ms)
+   + [17/63] anuj/PXL_20250228_041430183.jpg -> 1 face(s) (63ms)
+   + [18/63] anuj/PXL_20250301_081233080.jpg -> 1 face(s) (62ms)
+   + [19/63] anuj/PXL_20250301_081238880.jpg -> 1 face(s) (65ms)
+   + [20/63] anuj/PXL_20250302_122652927.jpg -> 2 face(s) (69ms)
+   + [21/63] anuj/PXL_20250302_122657446.jpg -> 2 face(s) (69ms)
+   + [22/63] anuj/PXL_20250308_225117937.jpg -> 1 face(s) (62ms)
+   + [23/63] anuj/PXL_20250328_043748660.jpg -> 6 face(s) (90ms)
+   + [24/63] anuj/PXL_20250328_043750292.jpg -> 6 face(s) (92ms)
+   + [25/63] anuj/PXL_20250612_221242470.jpg -> 1 face(s) (62ms)
+   + [26/63] anuj/PXL_20250728_211923220.jpg -> 1 face(s) (64ms)
+   + [27/63] anuj/PXL_20250905_185448760.jpg -> 2 face(s) (81ms)
+   . [28/63] anuj/PXL_20250905_185453916.MP.jpg -> 0 faces (73ms)
+   + [29/63] anuj/PXL_20251023_234020826.jpg -> 1 face(s) (66ms)
+   + [30/63] anuj/PXL_20251221_060912561.MP.jpg -> 1 face(s) (65ms)
+   + [31/63] kary/FB_IMG_1747972387449.jpg -> 1 face(s) (66ms)
+   + [32/63] kary/IMG-20241125-WA0007.jpg -> 2 face(s) (40ms)
+   + [33/63] kary/IMG_5756.JPG -> 1 face(s) (106ms)
+   + [34/63] kary/IMG_5837.JPG -> 3 face(s) (103ms)
+   + [35/63] kary/IMG_5838.JPG -> 3 face(s) (103ms)
+   + [36/63] kary/IMG_6002.JPG -> 2 face(s) (108ms)
+   + [37/63] kary/IMG_6004.JPG -> 2 face(s) (109ms)
+   + [38/63] kary/IMG_6333.JPG -> 4 face(s) (109ms)
+   + [39/63] kary/PXL_20230817_034256638.MP.jpg -> 1 face(s) (77ms)
+   + [40/63] kary/PXL_20230819_201950474.jpg -> 1 face(s) (77ms)
+   + [41/63] kary/PXL_20230819_204017849.PORTRAIT.jpg -> 1 face(s) (75ms)
+   + [42/63] kary/PXL_20230913_200208998.MP.jpg -> 1 face(s) (76ms)
+   + [43/63] kary/PXL_20231102_191628260.jpg -> 1 face(s) (74ms)
+   + [44/63] kary/PXL_20231102_192109012.jpg -> 2 face(s) (81ms)
+   + [45/63] kary/PXL_20240205_140150315.jpg -> 2 face(s) (70ms)
+   + [46/63] kary/PXL_20240207_180305760.jpg -> 1 face(s) (68ms)
+   + [47/63] kary/PXL_20240929_204246244.MP.jpg -> 1 face(s) (68ms)
+   + [48/63] kary/PXL_20240929_204252621.MP.jpg -> 1 face(s) (68ms)
+   + [49/63] kary/PXL_20241116_235913524.jpg -> 1 face(s) (68ms)
+   + [50/63] kary/PXL_20241123_215329189.MP.jpg -> 1 face(s) (70ms)
+   + [51/63] kary/PXL_20241214_025308751.jpg -> 1 face(s) (71ms)
+   + [52/63] kary/PXL_20241214_025348670.MP.jpg -> 1 face(s) (70ms)
+   + [53/63] kary/PXL_20250328_043748660.jpg -> 6 face(s) (90ms)
+   + [54/63] kary/PXL_20250328_043750292.jpg -> 6 face(s) (91ms)
+   + [55/63] kary/PXL_20250601_232113781.MP.jpg -> 1 face(s) (74ms)
+   + [56/63] kary/PXL_20250706_194616558.MP.jpg -> 1 face(s) (75ms)
+   + [57/63] kary/PXL_20250903_200921243.jpg -> 1 face(s) (76ms)
+   + [58/63] kary/PXL_20250905_181426418.jpg -> 1 face(s) (77ms)
+   + [59/63] kary/PXL_20250905_185448760.jpg -> 2 face(s) (81ms)
+   . [60/63] kary/PXL_20250905_185526741.jpg -> 0 faces (70ms)
+   + [61/63] kary/PXL_20260116_205723070.jpg -> 1 face(s) (76ms)
+   + [62/63] kary/PXL_20260116_205725487.jpg -> 1 face(s) (76ms)
+   + [63/63] kary/PXL_20260202_145826483.MP.jpg -> 1 face(s) (72ms)
+
+# Detection summary (4.64s):
+   anuj                     images=  30  faces=  48  zero-face-images=  1 (97% hit)  avg-faces-per-hit=1.66
+   kary                     images=  33  faces=  55  zero-face-images=  1 (97% hit)  avg-faces-per-hit=1.72
+   TOTAL                    images=  63  faces= 103
+
+# DBSCAN over 103 embedding(s) (eps=0.35 minPts=2)
+   done in 27ms
+
+# DBSCAN -> 19 cluster(s), 17 noise (eps=0.35 minPts=2)
+
+   cluster_0   size= 19  by-folder=anuj:16, kary:3   sim[mean/min/max]=0.593/0.385/0.957
+      - anuj/20250526202235904.jpg face_idx=0 score=0.82
+      - anuj/AirBrush_20250701080658.jpg face_idx=0 score=0.88
+      - anuj/IMG_5983.JPG face_idx=0 score=0.89
+      - anuj/IMG_5984.JPG face_idx=0 score=0.95
+      - anuj/PXL_20240205_153023234.jpg face_idx=1 score=0.79
+      - anuj/PXL_20240929_204429198.MP.jpg face_idx=0 score=0.87
+      - anuj/PXL_20240929_204430516.MP.jpg face_idx=0 score=0.84
+      - anuj/PXL_20241214_025323469.jpg face_idx=0 score=0.90
+      - anuj/PXL_20250228_041424576.jpg face_idx=0 score=0.87
+      - anuj/PXL_20250228_041430183.jpg face_idx=0 score=0.85
+      - anuj/PXL_20250301_081233080.jpg face_idx=0 score=0.89
+      - anuj/PXL_20250301_081238880.jpg face_idx=0 score=0.74
+      - anuj/PXL_20250308_225117937.jpg face_idx=0 score=0.76
+      - anuj/PXL_20250728_211923220.jpg face_idx=0 score=0.85
+      - anuj/PXL_20251023_234020826.jpg face_idx=0 score=0.84
+      - anuj/PXL_20251221_060912561.MP.jpg face_idx=0 score=0.85
+      - kary/IMG_6002.JPG face_idx=0 score=0.92
+      - kary/IMG_6004.JPG face_idx=0 score=0.91
+      - kary/PXL_20240205_140150315.jpg face_idx=1 score=0.77
+   cluster_1   size=  3  by-folder=anuj:2, kary:1   sim[mean/min/max]=0.777/0.700/0.889
+      - anuj/IMG-20241125-WA0008.jpg face_idx=0 score=0.91
+      - anuj/IMG-20241125-WA0028.jpg face_idx=0 score=0.79
+      - kary/IMG-20241125-WA0007.jpg face_idx=0 score=0.85
+   cluster_2   size=  5  by-folder=anuj:4, kary:1   sim[mean/min/max]=0.657/0.447/0.887
+      - anuj/IMG-20241125-WA0008.jpg face_idx=1 score=0.82
+      - anuj/IMG-20241125-WA0028.jpg face_idx=1 score=0.73
+      - anuj/PXL_20230818_184459973.jpg face_idx=0 score=0.91
+      - anuj/PXL_20230818_184727230.MP.jpg face_idx=0 score=0.96
+      - kary/IMG-20241125-WA0007.jpg face_idx=1 score=0.78
+   cluster_3   size=  3  by-folder=anuj:3   sim[mean/min/max]=0.722/0.674/0.817
+      - anuj/IMG_5983.JPG face_idx=1 score=0.88
+      - anuj/IMG_5984.JPG face_idx=1 score=0.91
+      - anuj/PXL_20221112_205831153.jpg face_idx=0 score=0.89
+   cluster_4   size= 24  by-folder=kary:21, anuj:3   sim[mean/min/max]=0.674/0.396/1.000
+      - anuj/PXL_20240205_153023234.jpg face_idx=0 score=0.84
+      - anuj/PXL_20250328_043748660.jpg face_idx=0 score=0.90
+      - anuj/PXL_20250328_043750292.jpg face_idx=1 score=0.87
+      - kary/IMG_5756.JPG face_idx=0 score=0.92
+      - kary/IMG_5837.JPG face_idx=0 score=0.94
+      - kary/IMG_5838.JPG face_idx=0 score=0.92
+      - kary/IMG_6002.JPG face_idx=1 score=0.89
+      - kary/IMG_6004.JPG face_idx=1 score=0.90
+      - kary/IMG_6333.JPG face_idx=0 score=0.97
+      - kary/PXL_20230817_034256638.MP.jpg face_idx=0 score=0.83
+      - kary/PXL_20230819_201950474.jpg face_idx=0 score=0.95
+      - kary/PXL_20230819_204017849.PORTRAIT.jpg face_idx=0 score=0.90
+      - kary/PXL_20230913_200208998.MP.jpg face_idx=0 score=0.94
+      - kary/PXL_20231102_192109012.jpg face_idx=0 score=0.90
+      - kary/PXL_20240205_140150315.jpg face_idx=0 score=0.95
+      - kary/PXL_20240207_180305760.jpg face_idx=0 score=0.88
+      - kary/PXL_20240929_204246244.MP.jpg face_idx=0 score=0.97
+      - kary/PXL_20240929_204252621.MP.jpg face_idx=0 score=0.97
+      - kary/PXL_20241116_235913524.jpg face_idx=0 score=0.93
+      - kary/PXL_20241214_025308751.jpg face_idx=0 score=0.91
+      - kary/PXL_20241214_025348670.MP.jpg face_idx=0 score=0.91
+      - kary/PXL_20250328_043748660.jpg face_idx=0 score=0.90
+      - kary/PXL_20250328_043750292.jpg face_idx=1 score=0.87
+      - kary/PXL_20260202_145826483.MP.jpg face_idx=0 score=0.93
+   cluster_5   size=  2  by-folder=anuj:2   sim[mean/min/max]=0.670/0.670/0.670
+      - anuj/PXL_20240808_145412369.jpg face_idx=0 score=0.88
+      - anuj/PXL_20250612_221242470.jpg face_idx=0 score=0.79
+   cluster_6   size=  2  by-folder=anuj:2   sim[mean/min/max]=0.716/0.716/0.716
+      - anuj/PXL_20250302_122652927.jpg face_idx=0 score=0.79
+      - anuj/PXL_20250302_122657446.jpg face_idx=0 score=0.84
+   cluster_7   size=  2  by-folder=anuj:2   sim[mean/min/max]=0.759/0.759/0.759
+      - anuj/PXL_20250302_122652927.jpg face_idx=1 score=0.70
+      - anuj/PXL_20250302_122657446.jpg face_idx=1 score=0.72
+   cluster_8   size=  4  by-folder=anuj:2, kary:2   sim[mean/min/max]=0.954/0.931/1.000
+      - anuj/PXL_20250328_043748660.jpg face_idx=1 score=0.85
+      - anuj/PXL_20250328_043750292.jpg face_idx=2 score=0.87
+      - kary/PXL_20250328_043748660.jpg face_idx=1 score=0.85
+      - kary/PXL_20250328_043750292.jpg face_idx=2 score=0.87
+   cluster_9   size=  4  by-folder=anuj:2, kary:2   sim[mean/min/max]=0.770/0.655/1.000
+      - anuj/PXL_20250328_043748660.jpg face_idx=2 score=0.81
+      - anuj/PXL_20250328_043750292.jpg face_idx=0 score=0.87
+      - kary/PXL_20250328_043748660.jpg face_idx=2 score=0.81
+      - kary/PXL_20250328_043750292.jpg face_idx=0 score=0.87
+   cluster_10  size=  2  by-folder=anuj:1, kary:1   sim[mean/min/max]=1.000/1.000/1.000
+      - anuj/PXL_20250328_043748660.jpg face_idx=3 score=0.80
+      - kary/PXL_20250328_043748660.jpg face_idx=3 score=0.80
+   cluster_11  size=  2  by-folder=anuj:1, kary:1   sim[mean/min/max]=1.000/1.000/1.000
+      - anuj/PXL_20250328_043748660.jpg face_idx=4 score=0.75
+      - kary/PXL_20250328_043748660.jpg face_idx=4 score=0.75
+   cluster_12  size=  2  by-folder=anuj:1, kary:1   sim[mean/min/max]=1.000/1.000/1.000
+      - anuj/PXL_20250328_043748660.jpg face_idx=5 score=0.71
+      - kary/PXL_20250328_043748660.jpg face_idx=5 score=0.71
+   cluster_13  size=  2  by-folder=anuj:1, kary:1   sim[mean/min/max]=1.000/1.000/1.000
+      - anuj/PXL_20250328_043750292.jpg face_idx=3 score=0.80
+      - kary/PXL_20250328_043750292.jpg face_idx=3 score=0.80
+   cluster_14  size=  2  by-folder=anuj:1, kary:1   sim[mean/min/max]=1.000/1.000/1.000
+      - anuj/PXL_20250328_043750292.jpg face_idx=4 score=0.63
+      - kary/PXL_20250328_043750292.jpg face_idx=4 score=0.63
+   cluster_15  size=  2  by-folder=anuj:1, kary:1   sim[mean/min/max]=1.000/1.000/1.000
+      - anuj/PXL_20250328_043750292.jpg face_idx=5 score=0.61
+      - kary/PXL_20250328_043750292.jpg face_idx=5 score=0.61
+   cluster_16  size=  2  by-folder=anuj:1, kary:1   sim[mean/min/max]=1.000/1.000/1.000
+      - anuj/PXL_20250905_185448760.jpg face_idx=0 score=0.89
+      - kary/PXL_20250905_185448760.jpg face_idx=0 score=0.89
+   cluster_17  size=  2  by-folder=anuj:1, kary:1   sim[mean/min/max]=1.000/1.000/1.000
+      - anuj/PXL_20250905_185448760.jpg face_idx=1 score=0.73
+      - kary/PXL_20250905_185448760.jpg face_idx=1 score=0.73
+   cluster_18  size=  2  by-folder=kary:2   sim[mean/min/max]=0.899/0.899/0.899
+      - kary/IMG_5837.JPG face_idx=1 score=0.84
+      - kary/IMG_5838.JPG face_idx=1 score=0.87
+
+   noise  (17 singleton face(s) -- did not cluster with anyone)
+      [anuj] 2 face(s):
+         - PXL_20221112_205831153.jpg face_idx=1 score=0.72
+         - PXL_20221213_062839047.jpg face_idx=0 score=0.62
+      [kary] 15 face(s):
+         - FB_IMG_1747972387449.jpg face_idx=0 score=0.84
+         - IMG_5837.JPG face_idx=2 score=0.80
+         - IMG_5838.JPG face_idx=2 score=0.67
+         - IMG_6333.JPG face_idx=1 score=0.88
+         - IMG_6333.JPG face_idx=2 score=0.82
+         - IMG_6333.JPG face_idx=3 score=0.70
+         - PXL_20231102_191628260.jpg face_idx=0 score=0.90
+         - PXL_20231102_192109012.jpg face_idx=1 score=0.83
+         - PXL_20241123_215329189.MP.jpg face_idx=0 score=0.76
+         - PXL_20250601_232113781.MP.jpg face_idx=0 score=0.75
+         - PXL_20250706_194616558.MP.jpg face_idx=0 score=0.67
+         - PXL_20250903_200921243.jpg face_idx=0 score=0.69
+         - PXL_20250905_181426418.jpg face_idx=0 score=0.64
+         - PXL_20260116_205723070.jpg face_idx=0 score=0.83
+         - PXL_20260116_205725487.jpg face_idx=0 score=0.89
+
+# Output bundle written to /Users/gifty/Development/FaceMesh/clusters
+   report.json     (108,253 bytes)
+   aligned/        (103 aligned 112x112 PNG(s))
+   cluster_NN/     (19 cluster dir(s) of symlinks)
+   noise/          (17 noise symlink(s))
+
+---
+
+**Cursor**
+
+Here’s a concise read of what your run is telling you.
+
+## What succeeded
+
+- **103 faces / 63 images** with full-range BlazeFace is a reasonable hit rate for real camera rolls (only **2 images** with zero faces — often motion blur / tiny faces / odd framing).
+- **Output under `./clusters`** is valid: **`report.json`** is the authoritative list; **`aligned/`** is useful for inspecting *which* embedding each row came from.
+
+## Duplicate images are dominating the clustering story
+
+Several clusters have **within-cluster cosine similarity exactly 1.0** (`cluster_10`–`cluster_17`) and explicitly pair **`anuj/...` ↔ `kary/...`** with the **same base filename**.
+
+That pattern almost always means the **exact same file (or bitwise-identical JPEG)** appeared in both Downloads folders — so the embedding is duplicated. DBSCAN happily creates **tiny “perfect-match” clusters** for those repeats. That partly explains **many clusters**.
+
+The **matching pair** clusters for `PXL_20250905_185448760` are the same idea: duplicated shot in both folders; each face pairs 1-to-1.
+
+## Interpretation of the big blobs (`cluster_0`, `cluster_4`)
+
+Those are **much looser internally** (`sim` mins down in the **~0.39–0.40** range) while still connected at **cosine-distance ≤ eps = 0.35**. That typically means DBSCAN **chained** along a corridor of pairwise neighbors — embedding space is forgiving enough that moderately different poses/lighting can glue into one blob.
+
+Rough folder split:
+
+- **`cluster_0`**: predominantly **anuj** (+3 kary outliers or shared scenes).
+- **`cluster_4`**: predominantly **kary** (+3 anuj outliers).
+
+Whether that’s **“correct” separation of two identities** depends on visually checking `clusters/aligned/*.png`, not just the histogram.
+
+## Noise (17 singletons)
+
+Noise here means **no other embedding was within distance 0.35** — common causes:
+
+- Rare pose/expression/lighting versus the rest,
+- Occlusion/hat/glasses/heavy shadow,
+- **Borderline BlazeFace landmarks** yielding a mediocre warp,
+
+not necessarily “wrong person.”
+
+## Practical next experiments (quick, no code)
+
+1. **De-dupe folders for evaluation** (or symlink one authoritative copy): identical files artificially inflate cluster count.
+2. **Sweep `eps`** on the **same inputs**: try **0.30 / 0.35 / 0.40 / 0.45** and watch how `cluster_0`/`cluster_4` merge vs how noise empties — that’s exactly what sliders on-device are for.
+3. **Inspect `./clusters/noise/`** next to `./clusters/cluster_XX/` in Finder; if noise faces “obviously belong” visually, embeddings are drifting — raise `eps` a bit first before touching detection.
+
+If you tell me whether `anuj` and `kary` are supposed to always be disjoint identities or there are deliberate duplicates, I can suggest a tighter default command line (e.g. higher `eps`, or preprocessing to skip identical hashes) for your next overnight batch.
+
+---
+
+**User**
+
+I did not expect 17 clusters from two folders - one dominated by my pics, one with my wife's pictures, and each of our folders had some group pictures of the two of us, and some pictures of my with my dad, and her with her relatives in her folder
+
+---
+
+**Cursor**
+
+Your expectation makes sense if you think in terms of **two folders = two people**. The pipeline does not work that way: it clusters **faces (embeddings)**, not folders. So the number of clusters is driven by **how many distinct-looking identities** appear across **all** crops, plus **noise** for faces that never got a neighbor within `eps`.
+
+## Why you can easily get ~19 clusters from “two dominated folders”
+
+1. **`by-folder` labels are only for checking quality** — they are not inputs to clustering. Anything in `anuj` that looks like person B still ends up near person B’s embeddings in `kary`.
+
+2. **Group photos multiply identities.** Your 6‑face shots alone contribute **six different people** worth of embeddings (you, your wife, and whoever else is in frame). Those should **not** collapse into two clusters unless you only had photos of exactly two individuals **and** embeddings were unusually tight.
+
+3. **Relatives / your dad appear as separate clusters** — that's expected unless they’re visually very similar across photos or `eps` is large enough to chain them together (often undesirable).
+
+4. **Duplicate shots across folders** (same filenames in both `Downloads/anuj` and `Downloads/kary`) create **very small clusters** with cosine similarity essentially **1.0** — that's not extra “people,” it’s **the same crops linked twice.** Your log showed several pairwise clusters like that.
+
+5. **DBSCAN merges by chains.** With `eps=0.35`, you can simultaneously get **a few huge, loose blobs** (`cluster_0`, `cluster_4` had pretty low minimum pairwise similarity) **and** many **tiny** clusters/noise — that’s typical when within-person variance is medium and cross-person similarity sometimes lands close to `eps`.
+
+6. **`17 noise`** means **17 faces never had ≥1 neighbor within cosine distance ≤ 0.35** — not “wrong folders,” usually **hard pose/lighting/occlusion/distance** relative to everything else that pass.
+
+So: **19 clusters ≠ 19 people.** It means **19 connected components** at that `eps`; many of yours are artifactually **pairs of duplicate files.**
+
+## Mental model that matches what you collected
+
+Roughly aim for clusters like:
+
+- You (solo + appearances in couples/groups),
+- Wife (solo + appearances),
+- Dad,
+- Possibly each recurring relative,
+
+…**plus** spurious splitting/merging based on lighting and **`eps`**, **plus** duplicate-image clusters inflating the count.
+
+## What to do next when you rerun
+
+- **Dedupe identical files** between folders (same path basename / checksum) when you’re evaluating clustering — removes the fake twin clusters immediately.
+- **Sweep `eps`** (e.g. `0.30`, `0.35`, `0.40`, `0.45`) and watch **`cluster_*`/`noise/`** in `./clusters`; you’re tuning how aggressively “same identity” merges across lighting and pose.
+- **Open `./clusters/aligned/`** alongside folder names in `report.json`; that tells you faster than cosine stats whether **`cluster_0` vs `cluster_4`** is “mostly me vs mostly her” versus accidental chaining.
+
+If you want, paste whether your goal is **exactly two identity clusters only** or **automatic discovery of whoever appears** — the right `eps`/workflow differs a lot between those goals.
+
+---
+
+**User**
+
+should we add eps as an optional parameter in the script? And suggest values t test
+
+---
+
+**Cursor**
+
+Checking the script: `eps` may already be exposed.
+
+
+
+`--eps` already exists. Enriching `--help` and the module docstring with suggested sweep values and brief interpretation.
+
+
+
+Confirming `--eps` is already optional (default `0.35`). Improving `--help` with an epilog that explains cosine distance and suggested sweep values.
+
+
+
+**Already there:** clustering has long been configurable with **`--eps`** (default **`0.35`**, aligned with Android) and **`--min-pts`** (default **`2`**).
+
+So you didn’t need a new flag—only clearer guidance.
+
+**Updated:** `--help` now spells out that `eps` is **cosine distance** \(d = 1 - \mathrm{similarity}\)) and prints a **`--eps` sweep section** after the arguments:
+
+| Region | `--eps` values | Effect |
+|--------|----------------|--------|
+| Strict | **0.28, 0.30, 0.32** | More clusters / more noise, identities split apart |
+| Default | **0.35** | Matches app / `PipelineConfig` |
+| Looser | **0.38, 0.40, 0.42** | Merges more looks of one person |
+| Very loose | **0.45, 0.50** | Fewer blobs; risky for relatives-looking-similar |
+
+There’s also a short **`--min-pts` note** (try **3** if you get flaky size-2 clusters).
+
+**Examples:**
+
+```bash
+python tools/reference_pipeline.py --folder ... --folder ... --eps 0.40 --out ./clusters_eps040
+python tools/reference_pipeline.py --folder ... --folder ... --eps 0.45 --quiet   # sweep without big output dirs
+python tools/reference_pipeline.py --help   # tuning block at bottom
+```
+
+Committed as **`e44449a`** (`reference_pipeline: document --eps tuning sweep in --help epilog`).
+
+---
+
+**User**
+
+python tools/reference_pipeline.py --folder /Users/gifty/Downloads/anuj --folder /Users/gifty/Downloads/kary --eps 0.50 --out ./clusters_eps50
+/Users/gifty/Development/FaceMesh/.venv/lib/python3.9/site-packages/urllib3/__init__.py:35: NotOpenSSLWarning: urllib3 v2 only supports OpenSSL 1.1.1+, currently the 'ssl' module is compiled with 'LibreSSL 2.8.3'. See: https://github.com/urllib3/urllib3/issues/3020
+  warnings.warn(
+# Building FP16 embedder
+/Users/gifty/Development/FaceMesh/.venv/lib/python3.9/site-packages/tensorflow/lite/python/interpreter.py:457: UserWarning:     Warning: tf.lite.Interpreter is deprecated and is scheduled for deletion in
+    TF 2.20. Please use the LiteRT interpreter from the ai_edge_litert package.
+    See the [migration guide](https://ai.google.dev/edge/litert/migration)
+    for details.
+    
+  warnings.warn(_INTERPRETER_DELETION_WARNING)
+INFO: Created TensorFlow Lite XNNPACK delegate for CPU.
+   built FP16_TFLITE
+# 63 image(s) across 2 folder(s); detector=full_range alignment=similarity eps=0.5 minPts=2
+
+   + [1/63] anuj/20250526202235904.jpg -> 1 face(s) (29ms)
+   + [2/63] anuj/AirBrush_20250701080658.jpg -> 1 face(s) (21ms)
+   + [3/63] anuj/IMG-20241125-WA0008.jpg -> 2 face(s) (41ms)
+   + [4/63] anuj/IMG-20241125-WA0028.jpg -> 2 face(s) (39ms)
+   + [5/63] anuj/IMG_5983.JPG -> 2 face(s) (105ms)
+   + [6/63] anuj/IMG_5984.JPG -> 2 face(s) (95ms)
+   + [7/63] anuj/PXL_20221112_205831153.jpg -> 2 face(s) (71ms)
+   + [8/63] anuj/PXL_20221213_062839047.jpg -> 1 face(s) (69ms)
+   + [9/63] anuj/PXL_20230818_184459973.jpg -> 1 face(s) (76ms)
+   + [10/63] anuj/PXL_20230818_184727230.MP.jpg -> 1 face(s) (77ms)
+   + [11/63] anuj/PXL_20240205_153023234.jpg -> 2 face(s) (66ms)
+   + [12/63] anuj/PXL_20240808_145412369.jpg -> 1 face(s) (63ms)
+   + [13/63] anuj/PXL_20240929_204429198.MP.jpg -> 1 face(s) (70ms)
+   + [14/63] anuj/PXL_20240929_204430516.MP.jpg -> 1 face(s) (69ms)
+   + [15/63] anuj/PXL_20241214_025323469.jpg -> 1 face(s) (72ms)
+   + [16/63] anuj/PXL_20250228_041424576.jpg -> 1 face(s) (64ms)
+   + [17/63] anuj/PXL_20250228_041430183.jpg -> 1 face(s) (63ms)
+   + [18/63] anuj/PXL_20250301_081233080.jpg -> 1 face(s) (62ms)
+   + [19/63] anuj/PXL_20250301_081238880.jpg -> 1 face(s) (66ms)
+   + [20/63] anuj/PXL_20250302_122652927.jpg -> 2 face(s) (69ms)
+   + [21/63] anuj/PXL_20250302_122657446.jpg -> 2 face(s) (69ms)
+   + [22/63] anuj/PXL_20250308_225117937.jpg -> 1 face(s) (63ms)
+   + [23/63] anuj/PXL_20250328_043748660.jpg -> 6 face(s) (90ms)
+   + [24/63] anuj/PXL_20250328_043750292.jpg -> 6 face(s) (91ms)
+   + [25/63] anuj/PXL_20250612_221242470.jpg -> 1 face(s) (62ms)
+   + [26/63] anuj/PXL_20250728_211923220.jpg -> 1 face(s) (64ms)
+   + [27/63] anuj/PXL_20250905_185448760.jpg -> 2 face(s) (81ms)
+   . [28/63] anuj/PXL_20250905_185453916.MP.jpg -> 0 faces (72ms)
+   + [29/63] anuj/PXL_20251023_234020826.jpg -> 1 face(s) (66ms)
+   + [30/63] anuj/PXL_20251221_060912561.MP.jpg -> 1 face(s) (64ms)
+   + [31/63] kary/FB_IMG_1747972387449.jpg -> 1 face(s) (66ms)
+   + [32/63] kary/IMG-20241125-WA0007.jpg -> 2 face(s) (40ms)
+   + [33/63] kary/IMG_5756.JPG -> 1 face(s) (106ms)
+   + [34/63] kary/IMG_5837.JPG -> 3 face(s) (102ms)
+   + [35/63] kary/IMG_5838.JPG -> 3 face(s) (103ms)
+   + [36/63] kary/IMG_6002.JPG -> 2 face(s) (108ms)
+   + [37/63] kary/IMG_6004.JPG -> 2 face(s) (107ms)
+   + [38/63] kary/IMG_6333.JPG -> 4 face(s) (107ms)
+   + [39/63] kary/PXL_20230817_034256638.MP.jpg -> 1 face(s) (76ms)
+   + [40/63] kary/PXL_20230819_201950474.jpg -> 1 face(s) (76ms)
+   + [41/63] kary/PXL_20230819_204017849.PORTRAIT.jpg -> 1 face(s) (76ms)
+   + [42/63] kary/PXL_20230913_200208998.MP.jpg -> 1 face(s) (76ms)
+   + [43/63] kary/PXL_20231102_191628260.jpg -> 1 face(s) (74ms)
+   + [44/63] kary/PXL_20231102_192109012.jpg -> 2 face(s) (81ms)
+   + [45/63] kary/PXL_20240205_140150315.jpg -> 2 face(s) (71ms)
+   + [46/63] kary/PXL_20240207_180305760.jpg -> 1 face(s) (69ms)
+   + [47/63] kary/PXL_20240929_204246244.MP.jpg -> 1 face(s) (70ms)
+   + [48/63] kary/PXL_20240929_204252621.MP.jpg -> 1 face(s) (69ms)
+   + [49/63] kary/PXL_20241116_235913524.jpg -> 1 face(s) (69ms)
+   + [50/63] kary/PXL_20241123_215329189.MP.jpg -> 1 face(s) (71ms)
+   + [51/63] kary/PXL_20241214_025308751.jpg -> 1 face(s) (71ms)
+   + [52/63] kary/PXL_20241214_025348670.MP.jpg -> 1 face(s) (70ms)
+   + [53/63] kary/PXL_20250328_043748660.jpg -> 6 face(s) (89ms)
+   + [54/63] kary/PXL_20250328_043750292.jpg -> 6 face(s) (91ms)
+   + [55/63] kary/PXL_20250601_232113781.MP.jpg -> 1 face(s) (73ms)
+   + [56/63] kary/PXL_20250706_194616558.MP.jpg -> 1 face(s) (73ms)
+   + [57/63] kary/PXL_20250903_200921243.jpg -> 1 face(s) (77ms)
+   + [58/63] kary/PXL_20250905_181426418.jpg -> 1 face(s) (77ms)
+   + [59/63] kary/PXL_20250905_185448760.jpg -> 2 face(s) (81ms)
+   . [60/63] kary/PXL_20250905_185526741.jpg -> 0 faces (70ms)
+   + [61/63] kary/PXL_20260116_205723070.jpg -> 1 face(s) (76ms)
+   + [62/63] kary/PXL_20260116_205725487.jpg -> 1 face(s) (76ms)
+   + [63/63] kary/PXL_20260202_145826483.MP.jpg -> 1 face(s) (72ms)
+
+# Detection summary (4.63s):
+   anuj                     images=  30  faces=  48  zero-face-images=  1 (97% hit)  avg-faces-per-hit=1.66
+   kary                     images=  33  faces=  55  zero-face-images=  1 (97% hit)  avg-faces-per-hit=1.72
+   TOTAL                    images=  63  faces= 103
+
+# DBSCAN over 103 embedding(s) (eps=0.5 minPts=2)
+   done in 27ms
+
+# DBSCAN -> 10 cluster(s), 14 noise (eps=0.5 minPts=2)
+
+   cluster_0   size= 32  by-folder=anuj:27, kary:5   sim[mean/min/max]=0.497/0.152/1.000
+      - anuj/20250526202235904.jpg face_idx=0 score=0.82
+      - anuj/AirBrush_20250701080658.jpg face_idx=0 score=0.88
+      - anuj/IMG-20241125-WA0008.jpg face_idx=1 score=0.82
+      - anuj/IMG-20241125-WA0028.jpg face_idx=1 score=0.73
+      - anuj/IMG_5983.JPG face_idx=0 score=0.89
+      - anuj/IMG_5984.JPG face_idx=0 score=0.95
+      - anuj/PXL_20221112_205831153.jpg face_idx=1 score=0.72
+      - anuj/PXL_20221213_062839047.jpg face_idx=0 score=0.62
+      - anuj/PXL_20230818_184459973.jpg face_idx=0 score=0.91
+      - anuj/PXL_20230818_184727230.MP.jpg face_idx=0 score=0.96
+      - anuj/PXL_20240205_153023234.jpg face_idx=1 score=0.79
+      - anuj/PXL_20240808_145412369.jpg face_idx=0 score=0.88
+      - anuj/PXL_20240929_204429198.MP.jpg face_idx=0 score=0.87
+      - anuj/PXL_20240929_204430516.MP.jpg face_idx=0 score=0.84
+      - anuj/PXL_20241214_025323469.jpg face_idx=0 score=0.90
+      - anuj/PXL_20250228_041424576.jpg face_idx=0 score=0.87
+      - anuj/PXL_20250228_041430183.jpg face_idx=0 score=0.85
+      - anuj/PXL_20250301_081233080.jpg face_idx=0 score=0.89
+      - anuj/PXL_20250301_081238880.jpg face_idx=0 score=0.74
+      - anuj/PXL_20250302_122652927.jpg face_idx=1 score=0.70
+      - anuj/PXL_20250302_122657446.jpg face_idx=1 score=0.72
+      - anuj/PXL_20250308_225117937.jpg face_idx=0 score=0.76
+      - anuj/PXL_20250612_221242470.jpg face_idx=0 score=0.79
+      - anuj/PXL_20250728_211923220.jpg face_idx=0 score=0.85
+      - anuj/PXL_20250905_185448760.jpg face_idx=1 score=0.73
+      - anuj/PXL_20251023_234020826.jpg face_idx=0 score=0.84
+      - anuj/PXL_20251221_060912561.MP.jpg face_idx=0 score=0.85
+      - kary/IMG-20241125-WA0007.jpg face_idx=1 score=0.78
+      - kary/IMG_6002.JPG face_idx=0 score=0.92
+      - kary/IMG_6004.JPG face_idx=0 score=0.91
+      - kary/PXL_20240205_140150315.jpg face_idx=1 score=0.77
+      - kary/PXL_20250905_185448760.jpg face_idx=1 score=0.73
+   cluster_1   size= 28  by-folder=kary:23, anuj:5   sim[mean/min/max]=0.620/0.300/1.000
+      - anuj/IMG-20241125-WA0008.jpg face_idx=0 score=0.91
+      - anuj/IMG-20241125-WA0028.jpg face_idx=0 score=0.79
+      - anuj/PXL_20240205_153023234.jpg face_idx=0 score=0.84
+      - anuj/PXL_20250328_043748660.jpg face_idx=0 score=0.90
+      - anuj/PXL_20250328_043750292.jpg face_idx=1 score=0.87
+      - kary/FB_IMG_1747972387449.jpg face_idx=0 score=0.84
+      - kary/IMG-20241125-WA0007.jpg face_idx=0 score=0.85
+      - kary/IMG_5756.JPG face_idx=0 score=0.92
+      - kary/IMG_5837.JPG face_idx=0 score=0.94
+      - kary/IMG_5838.JPG face_idx=0 score=0.92
+      - kary/IMG_6002.JPG face_idx=1 score=0.89
+      - kary/IMG_6004.JPG face_idx=1 score=0.90
+      - kary/IMG_6333.JPG face_idx=0 score=0.97
+      - kary/PXL_20230817_034256638.MP.jpg face_idx=0 score=0.83
+      - kary/PXL_20230819_201950474.jpg face_idx=0 score=0.95
+      - kary/PXL_20230819_204017849.PORTRAIT.jpg face_idx=0 score=0.90
+      - kary/PXL_20230913_200208998.MP.jpg face_idx=0 score=0.94
+      - kary/PXL_20231102_192109012.jpg face_idx=0 score=0.90
+      - kary/PXL_20240205_140150315.jpg face_idx=0 score=0.95
+      - kary/PXL_20240207_180305760.jpg face_idx=0 score=0.88
+      - kary/PXL_20240929_204246244.MP.jpg face_idx=0 score=0.97
+      - kary/PXL_20240929_204252621.MP.jpg face_idx=0 score=0.97
+      - kary/PXL_20241116_235913524.jpg face_idx=0 score=0.93
+      - kary/PXL_20241214_025308751.jpg face_idx=0 score=0.91
+      - kary/PXL_20241214_025348670.MP.jpg face_idx=0 score=0.91
+      - kary/PXL_20250328_043748660.jpg face_idx=0 score=0.90
+      - kary/PXL_20250328_043750292.jpg face_idx=1 score=0.87
+      - kary/PXL_20260202_145826483.MP.jpg face_idx=0 score=0.93
+   cluster_2   size=  5  by-folder=anuj:5   sim[mean/min/max]=0.615/0.437/0.817
+      - anuj/IMG_5983.JPG face_idx=1 score=0.88
+      - anuj/IMG_5984.JPG face_idx=1 score=0.91
+      - anuj/PXL_20221112_205831153.jpg face_idx=0 score=0.89
+      - anuj/PXL_20250302_122652927.jpg face_idx=0 score=0.79
+      - anuj/PXL_20250302_122657446.jpg face_idx=0 score=0.84
+   cluster_3   size=  4  by-folder=anuj:2, kary:2   sim[mean/min/max]=0.954/0.931/1.000
+      - anuj/PXL_20250328_043748660.jpg face_idx=1 score=0.85
+      - anuj/PXL_20250328_043750292.jpg face_idx=2 score=0.87
+      - kary/PXL_20250328_043748660.jpg face_idx=1 score=0.85
+      - kary/PXL_20250328_043750292.jpg face_idx=2 score=0.87
+   cluster_4   size=  4  by-folder=anuj:2, kary:2   sim[mean/min/max]=0.770/0.655/1.000
+      - anuj/PXL_20250328_043748660.jpg face_idx=2 score=0.81
+      - anuj/PXL_20250328_043750292.jpg face_idx=0 score=0.87
+      - kary/PXL_20250328_043748660.jpg face_idx=2 score=0.81
+      - kary/PXL_20250328_043750292.jpg face_idx=0 score=0.87
+   cluster_5   size=  4  by-folder=anuj:2, kary:2   sim[mean/min/max]=0.765/0.648/1.000
+      - anuj/PXL_20250328_043748660.jpg face_idx=3 score=0.80
+      - anuj/PXL_20250328_043750292.jpg face_idx=3 score=0.80
+      - kary/PXL_20250328_043748660.jpg face_idx=3 score=0.80
+      - kary/PXL_20250328_043750292.jpg face_idx=3 score=0.80
+   cluster_6   size=  4  by-folder=anuj:2, kary:2   sim[mean/min/max]=0.704/0.556/1.000
+      - anuj/PXL_20250328_043748660.jpg face_idx=4 score=0.75
+      - anuj/PXL_20250328_043750292.jpg face_idx=5 score=0.61
+      - kary/PXL_20250328_043748660.jpg face_idx=4 score=0.75
+      - kary/PXL_20250328_043750292.jpg face_idx=5 score=0.61
+   cluster_7   size=  4  by-folder=anuj:2, kary:2   sim[mean/min/max]=0.757/0.636/1.000
+      - anuj/PXL_20250328_043748660.jpg face_idx=5 score=0.71
+      - anuj/PXL_20250328_043750292.jpg face_idx=4 score=0.63
+      - kary/PXL_20250328_043748660.jpg face_idx=5 score=0.71
+      - kary/PXL_20250328_043750292.jpg face_idx=4 score=0.63
+   cluster_8   size=  2  by-folder=anuj:1, kary:1   sim[mean/min/max]=1.000/1.000/1.000
+      - anuj/PXL_20250905_185448760.jpg face_idx=0 score=0.89
+      - kary/PXL_20250905_185448760.jpg face_idx=0 score=0.89
+   cluster_9   size=  2  by-folder=kary:2   sim[mean/min/max]=0.899/0.899/0.899
+      - kary/IMG_5837.JPG face_idx=1 score=0.84
+      - kary/IMG_5838.JPG face_idx=1 score=0.87
+
+   noise  (14 singleton face(s) -- did not cluster with anyone)
+      [kary] 14 face(s):
+         - IMG_5837.JPG face_idx=2 score=0.80
+         - IMG_5838.JPG face_idx=2 score=0.67
+         - IMG_6333.JPG face_idx=1 score=0.88
+         - IMG_6333.JPG face_idx=2 score=0.82
+         - IMG_6333.JPG face_idx=3 score=0.70
+         - PXL_20231102_191628260.jpg face_idx=0 score=0.90
+         - PXL_20231102_192109012.jpg face_idx=1 score=0.83
+         - PXL_20241123_215329189.MP.jpg face_idx=0 score=0.76
+         - PXL_20250601_232113781.MP.jpg face_idx=0 score=0.75
+         - PXL_20250706_194616558.MP.jpg face_idx=0 score=0.67
+         - PXL_20250903_200921243.jpg face_idx=0 score=0.69
+         - PXL_20250905_181426418.jpg face_idx=0 score=0.64
+         - PXL_20260116_205723070.jpg face_idx=0 score=0.83
+         - PXL_20260116_205725487.jpg face_idx=0 score=0.89
+
+# Output bundle written to /Users/gifty/Development/FaceMesh/clusters_eps50
+   report.json     (106,124 bytes)
+   aligned/        (103 aligned 112x112 PNG(s))
+   cluster_NN/     (10 cluster dir(s) of symlinks)
+   noise/          (14 noise symlink(s))
+░▒▓ ~/Dev/FaceMesh  on main ⇡1 ?3  python tools/reference_pipeline.py --folder /Users/gifty/Downloads/anuj --folder /Users/gifty/Downloads/kary --eps 0.70 --out ./clusters_eps70
+/Users/gifty/Development/FaceMesh/.venv/lib/python3.9/site-packages/urllib3/__init__.py:35: NotOpenSSLWarning: urllib3 v2 only supports OpenSSL 1.1.1+, currently the 'ssl' module is compiled with 'LibreSSL 2.8.3'. See: https://github.com/urllib3/urllib3/issues/3020
+  warnings.warn(
+# Building FP16 embedder
+/Users/gifty/Development/FaceMesh/.venv/lib/python3.9/site-packages/tensorflow/lite/python/interpreter.py:457: UserWarning:     Warning: tf.lite.Interpreter is deprecated and is scheduled for deletion in
+    TF 2.20. Please use the LiteRT interpreter from the ai_edge_litert package.
+    See the [migration guide](https://ai.google.dev/edge/litert/migration)
+    for details.
+    
+  warnings.warn(_INTERPRETER_DELETION_WARNING)
+INFO: Created TensorFlow Lite XNNPACK delegate for CPU.
+   built FP16_TFLITE
+# 63 image(s) across 2 folder(s); detector=full_range alignment=similarity eps=0.7 minPts=2
+
+   + [1/63] anuj/20250526202235904.jpg -> 1 face(s) (28ms)
+   + [2/63] anuj/AirBrush_20250701080658.jpg -> 1 face(s) (22ms)
+   + [3/63] anuj/IMG-20241125-WA0008.jpg -> 2 face(s) (42ms)
+   + [4/63] anuj/IMG-20241125-WA0028.jpg -> 2 face(s) (39ms)
+   + [5/63] anuj/IMG_5983.JPG -> 2 face(s) (106ms)
+   + [6/63] anuj/IMG_5984.JPG -> 2 face(s) (94ms)
+   + [7/63] anuj/PXL_20221112_205831153.jpg -> 2 face(s) (72ms)
+   + [8/63] anuj/PXL_20221213_062839047.jpg -> 1 face(s) (68ms)
+   + [9/63] anuj/PXL_20230818_184459973.jpg -> 1 face(s) (76ms)
+   + [10/63] anuj/PXL_20230818_184727230.MP.jpg -> 1 face(s) (77ms)
+   + [11/63] anuj/PXL_20240205_153023234.jpg -> 2 face(s) (65ms)
+   + [12/63] anuj/PXL_20240808_145412369.jpg -> 1 face(s) (63ms)
+   + [13/63] anuj/PXL_20240929_204429198.MP.jpg -> 1 face(s) (69ms)
+   + [14/63] anuj/PXL_20240929_204430516.MP.jpg -> 1 face(s) (69ms)
+   + [15/63] anuj/PXL_20241214_025323469.jpg -> 1 face(s) (71ms)
+   + [16/63] anuj/PXL_20250228_041424576.jpg -> 1 face(s) (63ms)
+   + [17/63] anuj/PXL_20250228_041430183.jpg -> 1 face(s) (62ms)
+   + [18/63] anuj/PXL_20250301_081233080.jpg -> 1 face(s) (62ms)
+   + [19/63] anuj/PXL_20250301_081238880.jpg -> 1 face(s) (66ms)
+   + [20/63] anuj/PXL_20250302_122652927.jpg -> 2 face(s) (68ms)
+   + [21/63] anuj/PXL_20250302_122657446.jpg -> 2 face(s) (69ms)
+   + [22/63] anuj/PXL_20250308_225117937.jpg -> 1 face(s) (64ms)
+   + [23/63] anuj/PXL_20250328_043748660.jpg -> 6 face(s) (89ms)
+   + [24/63] anuj/PXL_20250328_043750292.jpg -> 6 face(s) (91ms)
+   + [25/63] anuj/PXL_20250612_221242470.jpg -> 1 face(s) (62ms)
+   + [26/63] anuj/PXL_20250728_211923220.jpg -> 1 face(s) (63ms)
+   + [27/63] anuj/PXL_20250905_185448760.jpg -> 2 face(s) (81ms)
+   . [28/63] anuj/PXL_20250905_185453916.MP.jpg -> 0 faces (73ms)
+   + [29/63] anuj/PXL_20251023_234020826.jpg -> 1 face(s) (65ms)
+   + [30/63] anuj/PXL_20251221_060912561.MP.jpg -> 1 face(s) (64ms)
+   + [31/63] kary/FB_IMG_1747972387449.jpg -> 1 face(s) (65ms)
+   + [32/63] kary/IMG-20241125-WA0007.jpg -> 2 face(s) (39ms)
+   + [33/63] kary/IMG_5756.JPG -> 1 face(s) (106ms)
+   + [34/63] kary/IMG_5837.JPG -> 3 face(s) (103ms)
+   + [35/63] kary/IMG_5838.JPG -> 3 face(s) (104ms)
+   + [36/63] kary/IMG_6002.JPG -> 2 face(s) (110ms)
+   + [37/63] kary/IMG_6004.JPG -> 2 face(s) (109ms)
+   + [38/63] kary/IMG_6333.JPG -> 4 face(s) (108ms)
+   + [39/63] kary/PXL_20230817_034256638.MP.jpg -> 1 face(s) (76ms)
+   + [40/63] kary/PXL_20230819_201950474.jpg -> 1 face(s) (77ms)
+   + [41/63] kary/PXL_20230819_204017849.PORTRAIT.jpg -> 1 face(s) (75ms)
+   + [42/63] kary/PXL_20230913_200208998.MP.jpg -> 1 face(s) (76ms)
+   + [43/63] kary/PXL_20231102_191628260.jpg -> 1 face(s) (73ms)
+   + [44/63] kary/PXL_20231102_192109012.jpg -> 2 face(s) (79ms)
+   + [45/63] kary/PXL_20240205_140150315.jpg -> 2 face(s) (70ms)
+   + [46/63] kary/PXL_20240207_180305760.jpg -> 1 face(s) (68ms)
+   + [47/63] kary/PXL_20240929_204246244.MP.jpg -> 1 face(s) (69ms)
+   + [48/63] kary/PXL_20240929_204252621.MP.jpg -> 1 face(s) (69ms)
+   + [49/63] kary/PXL_20241116_235913524.jpg -> 1 face(s) (69ms)
+   + [50/63] kary/PXL_20241123_215329189.MP.jpg -> 1 face(s) (70ms)
+   + [51/63] kary/PXL_20241214_025308751.jpg -> 1 face(s) (71ms)
+   + [52/63] kary/PXL_20241214_025348670.MP.jpg -> 1 face(s) (69ms)
+   + [53/63] kary/PXL_20250328_043748660.jpg -> 6 face(s) (90ms)
+   + [54/63] kary/PXL_20250328_043750292.jpg -> 6 face(s) (92ms)
+   + [55/63] kary/PXL_20250601_232113781.MP.jpg -> 1 face(s) (74ms)
+   + [56/63] kary/PXL_20250706_194616558.MP.jpg -> 1 face(s) (73ms)
+   + [57/63] kary/PXL_20250903_200921243.jpg -> 1 face(s) (76ms)
+   + [58/63] kary/PXL_20250905_181426418.jpg -> 1 face(s) (77ms)
+   + [59/63] kary/PXL_20250905_185448760.jpg -> 2 face(s) (81ms)
+   . [60/63] kary/PXL_20250905_185526741.jpg -> 0 faces (70ms)
+   + [61/63] kary/PXL_20260116_205723070.jpg -> 1 face(s) (76ms)
+   + [62/63] kary/PXL_20260116_205725487.jpg -> 1 face(s) (76ms)
+   + [63/63] kary/PXL_20260202_145826483.MP.jpg -> 1 face(s) (72ms)
+
+# Detection summary (4.62s):
+   anuj                     images=  30  faces=  48  zero-face-images=  1 (97% hit)  avg-faces-per-hit=1.66
+   kary                     images=  33  faces=  55  zero-face-images=  1 (97% hit)  avg-faces-per-hit=1.72
+   TOTAL                    images=  63  faces= 103
+
+# DBSCAN over 103 embedding(s) (eps=0.7 minPts=2)
+   done in 27ms
+
+# DBSCAN -> 5 cluster(s), 3 noise (eps=0.7 minPts=2)
+
+   cluster_0   size= 85  by-folder=kary:46, anuj:39   sim[mean/min/max]=0.217/-0.164/1.000
+      - anuj/20250526202235904.jpg face_idx=0 score=0.82
+      - anuj/AirBrush_20250701080658.jpg face_idx=0 score=0.88
+      - anuj/IMG-20241125-WA0008.jpg face_idx=0 score=0.91
+      - anuj/IMG-20241125-WA0008.jpg face_idx=1 score=0.82
+      - anuj/IMG-20241125-WA0028.jpg face_idx=0 score=0.79
+      - anuj/IMG-20241125-WA0028.jpg face_idx=1 score=0.73
+      - anuj/IMG_5983.JPG face_idx=0 score=0.89
+      - anuj/IMG_5984.JPG face_idx=0 score=0.95
+      - anuj/PXL_20221112_205831153.jpg face_idx=1 score=0.72
+      - anuj/PXL_20221213_062839047.jpg face_idx=0 score=0.62
+      - anuj/PXL_20230818_184459973.jpg face_idx=0 score=0.91
+      - anuj/PXL_20230818_184727230.MP.jpg face_idx=0 score=0.96
+      - anuj/PXL_20240205_153023234.jpg face_idx=0 score=0.84
+      - anuj/PXL_20240205_153023234.jpg face_idx=1 score=0.79
+      - anuj/PXL_20240808_145412369.jpg face_idx=0 score=0.88
+      - anuj/PXL_20240929_204429198.MP.jpg face_idx=0 score=0.87
+      - anuj/PXL_20240929_204430516.MP.jpg face_idx=0 score=0.84
+      - anuj/PXL_20241214_025323469.jpg face_idx=0 score=0.90
+      - anuj/PXL_20250228_041424576.jpg face_idx=0 score=0.87
+      - anuj/PXL_20250228_041430183.jpg face_idx=0 score=0.85
+      - anuj/PXL_20250301_081233080.jpg face_idx=0 score=0.89
+      - anuj/PXL_20250301_081238880.jpg face_idx=0 score=0.74
+      - anuj/PXL_20250302_122652927.jpg face_idx=1 score=0.70
+      - anuj/PXL_20250302_122657446.jpg face_idx=1 score=0.72
+      - anuj/PXL_20250308_225117937.jpg face_idx=0 score=0.76
+      - anuj/PXL_20250328_043748660.jpg face_idx=0 score=0.90
+      - anuj/PXL_20250328_043748660.jpg face_idx=3 score=0.80
+      - anuj/PXL_20250328_043748660.jpg face_idx=4 score=0.75
+      - anuj/PXL_20250328_043748660.jpg face_idx=5 score=0.71
+      - anuj/PXL_20250328_043750292.jpg face_idx=1 score=0.87
+      - anuj/PXL_20250328_043750292.jpg face_idx=3 score=0.80
+      - anuj/PXL_20250328_043750292.jpg face_idx=4 score=0.63
+      - anuj/PXL_20250328_043750292.jpg face_idx=5 score=0.61
+      - anuj/PXL_20250612_221242470.jpg face_idx=0 score=0.79
+      - anuj/PXL_20250728_211923220.jpg face_idx=0 score=0.85
+      - anuj/PXL_20250905_185448760.jpg face_idx=0 score=0.89
+      - anuj/PXL_20250905_185448760.jpg face_idx=1 score=0.73
+      - anuj/PXL_20251023_234020826.jpg face_idx=0 score=0.84
+      - anuj/PXL_20251221_060912561.MP.jpg face_idx=0 score=0.85
+      - kary/FB_IMG_1747972387449.jpg face_idx=0 score=0.84
+      - kary/IMG-20241125-WA0007.jpg face_idx=0 score=0.85
+      - kary/IMG-20241125-WA0007.jpg face_idx=1 score=0.78
+      - kary/IMG_5756.JPG face_idx=0 score=0.92
+      - kary/IMG_5837.JPG face_idx=0 score=0.94
+      - kary/IMG_5838.JPG face_idx=0 score=0.92
+      - kary/IMG_6002.JPG face_idx=0 score=0.92
+      - kary/IMG_6002.JPG face_idx=1 score=0.89
+      - kary/IMG_6004.JPG face_idx=0 score=0.91
+      - kary/IMG_6004.JPG face_idx=1 score=0.90
+      - kary/IMG_6333.JPG face_idx=0 score=0.97
+      - kary/IMG_6333.JPG face_idx=1 score=0.88
+      - kary/IMG_6333.JPG face_idx=2 score=0.82
+      - kary/IMG_6333.JPG face_idx=3 score=0.70
+      - kary/PXL_20230817_034256638.MP.jpg face_idx=0 score=0.83
+      - kary/PXL_20230819_201950474.jpg face_idx=0 score=0.95
+      - kary/PXL_20230819_204017849.PORTRAIT.jpg face_idx=0 score=0.90
+      - kary/PXL_20230913_200208998.MP.jpg face_idx=0 score=0.94
+      - kary/PXL_20231102_191628260.jpg face_idx=0 score=0.90
+      - kary/PXL_20231102_192109012.jpg face_idx=0 score=0.90
+      - kary/PXL_20240205_140150315.jpg face_idx=0 score=0.95
+      - kary/PXL_20240205_140150315.jpg face_idx=1 score=0.77
+      - kary/PXL_20240207_180305760.jpg face_idx=0 score=0.88
+      - kary/PXL_20240929_204246244.MP.jpg face_idx=0 score=0.97
+      - kary/PXL_20240929_204252621.MP.jpg face_idx=0 score=0.97
+      - kary/PXL_20241116_235913524.jpg face_idx=0 score=0.93
+      - kary/PXL_20241123_215329189.MP.jpg face_idx=0 score=0.76
+      - kary/PXL_20241214_025308751.jpg face_idx=0 score=0.91
+      - kary/PXL_20241214_025348670.MP.jpg face_idx=0 score=0.91
+      - kary/PXL_20250328_043748660.jpg face_idx=0 score=0.90
+      - kary/PXL_20250328_043748660.jpg face_idx=3 score=0.80
+      - kary/PXL_20250328_043748660.jpg face_idx=4 score=0.75
+      - kary/PXL_20250328_043748660.jpg face_idx=5 score=0.71
+      - kary/PXL_20250328_043750292.jpg face_idx=1 score=0.87
+      - kary/PXL_20250328_043750292.jpg face_idx=3 score=0.80
+      - kary/PXL_20250328_043750292.jpg face_idx=4 score=0.63
+      - kary/PXL_20250328_043750292.jpg face_idx=5 score=0.61
+      - kary/PXL_20250601_232113781.MP.jpg face_idx=0 score=0.75
+      - kary/PXL_20250706_194616558.MP.jpg face_idx=0 score=0.67
+      - kary/PXL_20250903_200921243.jpg face_idx=0 score=0.69
+      - kary/PXL_20250905_181426418.jpg face_idx=0 score=0.64
+      - kary/PXL_20250905_185448760.jpg face_idx=0 score=0.89
+      - kary/PXL_20250905_185448760.jpg face_idx=1 score=0.73
+      - kary/PXL_20260116_205723070.jpg face_idx=0 score=0.83
+      - kary/PXL_20260116_205725487.jpg face_idx=0 score=0.89
+      - kary/PXL_20260202_145826483.MP.jpg face_idx=0 score=0.93
+   cluster_1   size=  5  by-folder=anuj:5   sim[mean/min/max]=0.615/0.437/0.817
+      - anuj/IMG_5983.JPG face_idx=1 score=0.88
+      - anuj/IMG_5984.JPG face_idx=1 score=0.91
+      - anuj/PXL_20221112_205831153.jpg face_idx=0 score=0.89
+      - anuj/PXL_20250302_122652927.jpg face_idx=0 score=0.79
+      - anuj/PXL_20250302_122657446.jpg face_idx=0 score=0.84
+   cluster_2   size=  4  by-folder=anuj:2, kary:2   sim[mean/min/max]=0.954/0.931/1.000
+      - anuj/PXL_20250328_043748660.jpg face_idx=1 score=0.85
+      - anuj/PXL_20250328_043750292.jpg face_idx=2 score=0.87
+      - kary/PXL_20250328_043748660.jpg face_idx=1 score=0.85
+      - kary/PXL_20250328_043750292.jpg face_idx=2 score=0.87
+   cluster_3   size=  4  by-folder=anuj:2, kary:2   sim[mean/min/max]=0.770/0.655/1.000
+      - anuj/PXL_20250328_043748660.jpg face_idx=2 score=0.81
+      - anuj/PXL_20250328_043750292.jpg face_idx=0 score=0.87
+      - kary/PXL_20250328_043748660.jpg face_idx=2 score=0.81
+      - kary/PXL_20250328_043750292.jpg face_idx=0 score=0.87
+   cluster_4   size=  2  by-folder=kary:2   sim[mean/min/max]=0.899/0.899/0.899
+      - kary/IMG_5837.JPG face_idx=1 score=0.84
+      - kary/IMG_5838.JPG face_idx=1 score=0.87
+
+   noise  (3 singleton face(s) -- did not cluster with anyone)
+      [kary] 3 face(s):
+         - IMG_5837.JPG face_idx=2 score=0.80
+         - IMG_5838.JPG face_idx=2 score=0.67
+         - PXL_20231102_192109012.jpg face_idx=1 score=0.83
+
+# Output bundle written to /Users/gifty/Development/FaceMesh/clusters_eps70
+   report.json     (106,719 bytes)
+   aligned/        (103 aligned 112x112 PNG(s))
+   cluster_NN/     (5 cluster dir(s) of symlinks)
+   noise/          (3 noise symlink(s))
+
+---
+
+**Cursor**
+
+Here’s how to read what you ran.
+
+## `$eps = 0.50$` — still somewhat meaningful
+
+You went from **19 → 10** clusters and **17 → 14** noise. The big splits look closer to **“mostly you” vs “mostly her”**:
+
+- **`cluster_0`** — **`anuj:27`, `kary:5`** (your folder dominates).
+- **`cluster_1`** — **`kary:23`, `anuj:5`** (her folder dominates).
+
+The cross-folder leakage (5 faces each way) matches **photos of **both**** of you: your face appears in “her” folder and vice versa, so embeddings really do land in **both** regions of space. Folder tags are metadata only; clustering doesn’t know “whose library” something came from.
+
+The **six-face** outings still leave **duplicate / twin** clusters (**`cluster_3`–`cluster_7`**, **`cluster_8`**) unless they fully merge later — **`cluster_9`** is likely a recurring third person/sibling crop in **`IMG_5837/5838`** (same pairing as before).
+
+Noise is mostly **wife’s folder** singletons → still **hard embeddings** (distance, angle, occlusion) or weak links to larger blobs — not necessarily “wrong person.”
+
+## `$eps = 0.70$` — largely **past** usable face clustering
+
+Conceptually **`eps`** is cosine **distance**: pair them if **`d = 1 - \mathrm{similarity} \leq \varepsilon`** → equivalently **`similarity \geq 1 - \varepsilon`**.
+
+So **`eps = 0.7`** means you keep neighbours with cosine similarity **`\\geq 0.3`**. That is **very loose** for identity: many unrelated faces beat 0.3, and DBSCAN fills in **chains** (“A connects to B, B to C…”).
+
+That shows up bluntly in your metrics:
+
+**`cluster_0`** **`sim[mean/min/max]=0.217/-0.164/1.000`**
+
+Interpretation:
+
+- Mean similarity **~0.22** → “typical pairs in this cluster barely look like the same identity.”  
+- Minimum **‑0.16** → some pairs are **orthogonal or opposite-ish** — they should never share an identity cluster.  
+So **`cluster_0` is mostly an artifact of `eps` being too large**, not “everyone collapsed into family.” Practically unusable unless you only want **one huge blob** on purpose.
+
+The **five** leftover clusters (**`cluster_2`–`cluster_4`**, **`cluster_6`**) are mostly **pairs that still didn’t even meet the 0.7 bar** vs the giant blob, or sat on the wrong side of a chain break — splitting is brittle at extreme `eps`.
+
+## Practical takeaway for your sweep
+
+| `eps` | What you observed | Verdict |
+|--------|-------------------|--------|
+| **~0.35** | Very fragmented | Good for diagnosing; harsh for messy camera rolls |
+| **~0.50** | Fewer blobs, dominant folder split still visible | Reasonable exploratory step |
+| **~0.70** | One 85‑face mega-cluster + tiny residue | **`eps` too high — don’t tune the app toward this** |
+
+A **narrow band** worth focusing on next (same input, `--out` to different dirs) is **`0.42` → `0.48`**. Above **~0.55** starts to risk **bridging unrelated people**, especially with **chains** across **many** identities in group shots.
+
+**Bottom line:** your **`eps=0.50`** run is **more informative** than **`0.70`**. **`0.70`** “fixes” fragmentation by gluing embeddings that **`sim(mean)=0.217`** admits are unrelated — stick to **moderate `eps`** and accept **noise** or **later manual merge**, rather than chasing **one cluster**.
+
+If you paste what you’re optimizing for (**two subject clusters vs every distinct person**) we can nail a narrower target band; for household photos **0.38–0.48** usually stays safer than **0.6+**.
+
+---
+
+**User**
+
+Let's talk about De-dupe folders for evaluation (or symlink one authoritative copy): identical files artificially inflate cluster count.
+
+---
+
+**Cursor**
+
+Explaining deduplication and adding an optional `--dedupe-by-content` flag to `reference_pipeline.py` so evaluation runs omit byte-identical duplicates automatically.
+
+
+
+Explaining why byte-identical copies inflate clustering, then implementing `--dedupe-by-content`: SHA-256–based deduplication keeps the first path seen (respecting `--folder` order), records skipped duplicates in stats/`report.json`, and refactors the pipeline to run on an explicit `(path, label)` work queue.
+
+
+
+Implementing hashing helpers, refactoring `run_pipeline` to accept a flat work queue, and adding `--dedupe-by-content`.
+
+
+
+## Why identical files inflate cluster counts
+
+DBSCAN clusters **faces**, not files. If the **same byte-for-byte image** exists in `anuj/` and `kary/`, you run detection twice and get **two embeddings per face** — they match **exactly** (cosine distance ~0). With `minPts = 2`, that often becomes a **tiny “cluster” that is just the duplicate pair**, or it **splits ties** odd ways with neighbouring points. Same physical group shot copied into both Downloads trees is exactly what produced those **`sim mean/min/max = 1.0`** cross-folder clusters in your log.
+
+Duplicate files do **not** create extra real identities — they **add duplicate points** in embedding space.
+
+## Dedupe strategies (pick what fits your workflow)
+
+1. **`--dedupe-by-content` in the script** (what we shipped now) — full-file **SHA-256**; keeps the **first** path in walk order (**`--folder`** order first, then sorted paths inside each folder). Skipped pairs are summarized on stdout (unless `--quiet`) and listed under `run_stats["dedupe_by_content"]` → **`report.json`**.
+
+```bash
+python tools/reference_pipeline.py \
+  --folder ~/Downloads/anuj --folder ~/Downloads/kary \
+  --dedupe-by-content \
+  --eps 0.5 --out ./clusters_deduped
+```
+
+Only **exact byte duplicates** are removed — same scene recompressed or resized will **not** match (that’s deliberate).
+
+2. **One authoritative tree + symlinks** — e.g. keep originals only under `~/Photos/master/` and `ln -s` into `anuj/` / `kary/` for evaluation. Our walker already **resolves** paths, so a symlink and its target are not double-counted **if** you only have one real path in the tree you pass in. If you symlink the **same** file into **both** folders as two different symlink paths, you still get **two paths** unless you use dedupe (two paths → two hashes from same inode but we read bytes once per path — actually same inode same bytes → **same SHA-256**, dedupe collapses).
+
+3. **`Same basename`** heuristics — fast but fragile (two different shots can share a generic name).
+
+## Behaviour note after dedupe
+
+Per-folder counts reflect **unique files still in the queue** for that label. If the kept copy always comes from `--folder …/anuj`, `kary` can show **`images=0`** for those duplicates — that’s expected.
+
+---
+
+Implemented in **`d55df06`**: refactor to a flat work queue plus **`--dedupe-by-content`**. Re-run your anuj/kary sweep with it to drop the pairwise “same file twice” clutter before interpreting `eps`.
+
+---
+
+**User**
+
+python tools/reference_pipeline.py --folder /Users/gifty/Downloads/anuj --folder /Users/gifty/Downloads/kary --eps 0.50 --dedupe-by-content --out ./clusters_eps50_2
+/Users/gifty/Development/FaceMesh/.venv/lib/python3.9/site-packages/urllib3/__init__.py:35: NotOpenSSLWarning: urllib3 v2 only supports OpenSSL 1.1.1+, currently the 'ssl' module is compiled with 'LibreSSL 2.8.3'. See: https://github.com/urllib3/urllib3/issues/3020
+  warnings.warn(
+# Building FP16 embedder
+/Users/gifty/Development/FaceMesh/.venv/lib/python3.9/site-packages/tensorflow/lite/python/interpreter.py:457: UserWarning:     Warning: tf.lite.Interpreter is deprecated and is scheduled for deletion in
+    TF 2.20. Please use the LiteRT interpreter from the ai_edge_litert package.
+    See the [migration guide](https://ai.google.dev/edge/litert/migration)
+    for details.
+    
+  warnings.warn(_INTERPRETER_DELETION_WARNING)
+INFO: Created TensorFlow Lite XNNPACK delegate for CPU.
+   built FP16_TFLITE
+# Dedupe-by-content (SHA-256): 63 paths -> 60 unique (3 skipped) in 0.09s
+      skip [kary]PXL_20250328_043748660.jpg -> keep [anuj]PXL_20250328_043748660.jpg
+      skip [kary]PXL_20250328_043750292.jpg -> keep [anuj]PXL_20250328_043750292.jpg
+      skip [kary]PXL_20250905_185448760.jpg -> keep [anuj]PXL_20250905_185448760.jpg
+
+# 60 image(s) in work queue across 2 folder label(s); detector=full_range alignment=similarity eps=0.5 minPts=2
+
+   + [1/60] anuj/20250526202235904.jpg -> 1 face(s) (28ms)
+   + [2/60] anuj/AirBrush_20250701080658.jpg -> 1 face(s) (22ms)
+   + [3/60] anuj/IMG-20241125-WA0008.jpg -> 2 face(s) (41ms)
+   + [4/60] anuj/IMG-20241125-WA0028.jpg -> 2 face(s) (39ms)
+   + [5/60] anuj/IMG_5983.JPG -> 2 face(s) (107ms)
+   + [6/60] anuj/IMG_5984.JPG -> 2 face(s) (95ms)
+   + [7/60] anuj/PXL_20221112_205831153.jpg -> 2 face(s) (71ms)
+   + [8/60] anuj/PXL_20221213_062839047.jpg -> 1 face(s) (69ms)
+   + [9/60] anuj/PXL_20230818_184459973.jpg -> 1 face(s) (75ms)
+   + [10/60] anuj/PXL_20230818_184727230.MP.jpg -> 1 face(s) (77ms)
+   + [11/60] anuj/PXL_20240205_153023234.jpg -> 2 face(s) (66ms)
+   + [12/60] anuj/PXL_20240808_145412369.jpg -> 1 face(s) (63ms)
+   + [13/60] anuj/PXL_20240929_204429198.MP.jpg -> 1 face(s) (69ms)
+   + [14/60] anuj/PXL_20240929_204430516.MP.jpg -> 1 face(s) (69ms)
+   + [15/60] anuj/PXL_20241214_025323469.jpg -> 1 face(s) (72ms)
+   + [16/60] anuj/PXL_20250228_041424576.jpg -> 1 face(s) (64ms)
+   + [17/60] anuj/PXL_20250228_041430183.jpg -> 1 face(s) (63ms)
+   + [18/60] anuj/PXL_20250301_081233080.jpg -> 1 face(s) (63ms)
+   + [19/60] anuj/PXL_20250301_081238880.jpg -> 1 face(s) (66ms)
+   + [20/60] anuj/PXL_20250302_122652927.jpg -> 2 face(s) (69ms)
+   + [21/60] anuj/PXL_20250302_122657446.jpg -> 2 face(s) (69ms)
+   + [22/60] anuj/PXL_20250308_225117937.jpg -> 1 face(s) (63ms)
+   + [23/60] anuj/PXL_20250328_043748660.jpg -> 6 face(s) (91ms)
+   + [24/60] anuj/PXL_20250328_043750292.jpg -> 6 face(s) (91ms)
+   + [25/60] anuj/PXL_20250612_221242470.jpg -> 1 face(s) (61ms)
+   + [26/60] anuj/PXL_20250728_211923220.jpg -> 1 face(s) (62ms)
+   + [27/60] anuj/PXL_20250905_185448760.jpg -> 2 face(s) (79ms)
+   . [28/60] anuj/PXL_20250905_185453916.MP.jpg -> 0 faces (115ms)
+   + [29/60] anuj/PXL_20251023_234020826.jpg -> 1 face(s) (65ms)
+   + [30/60] anuj/PXL_20251221_060912561.MP.jpg -> 1 face(s) (64ms)
+   + [31/60] kary/FB_IMG_1747972387449.jpg -> 1 face(s) (21ms)
+   + [32/60] kary/IMG-20241125-WA0007.jpg -> 2 face(s) (40ms)
+   + [33/60] kary/IMG_5756.JPG -> 1 face(s) (107ms)
+   + [34/60] kary/IMG_5837.JPG -> 3 face(s) (104ms)
+   + [35/60] kary/IMG_5838.JPG -> 3 face(s) (104ms)
+   + [36/60] kary/IMG_6002.JPG -> 2 face(s) (109ms)
+   + [37/60] kary/IMG_6004.JPG -> 2 face(s) (108ms)
+   + [38/60] kary/IMG_6333.JPG -> 4 face(s) (108ms)
+   + [39/60] kary/PXL_20230817_034256638.MP.jpg -> 1 face(s) (76ms)
+   + [40/60] kary/PXL_20230819_201950474.jpg -> 1 face(s) (77ms)
+   + [41/60] kary/PXL_20230819_204017849.PORTRAIT.jpg -> 1 face(s) (75ms)
+   + [42/60] kary/PXL_20230913_200208998.MP.jpg -> 1 face(s) (76ms)
+   + [43/60] kary/PXL_20231102_191628260.jpg -> 1 face(s) (74ms)
+   + [44/60] kary/PXL_20231102_192109012.jpg -> 2 face(s) (81ms)
+   + [45/60] kary/PXL_20240205_140150315.jpg -> 2 face(s) (71ms)
+   + [46/60] kary/PXL_20240207_180305760.jpg -> 1 face(s) (70ms)
+   + [47/60] kary/PXL_20240929_204246244.MP.jpg -> 1 face(s) (70ms)
+   + [48/60] kary/PXL_20240929_204252621.MP.jpg -> 1 face(s) (69ms)
+   + [49/60] kary/PXL_20241116_235913524.jpg -> 1 face(s) (69ms)
+   + [50/60] kary/PXL_20241123_215329189.MP.jpg -> 1 face(s) (70ms)
+   + [51/60] kary/PXL_20241214_025308751.jpg -> 1 face(s) (71ms)
+   + [52/60] kary/PXL_20241214_025348670.MP.jpg -> 1 face(s) (69ms)
+   + [53/60] kary/PXL_20250601_232113781.MP.jpg -> 1 face(s) (74ms)
+   + [54/60] kary/PXL_20250706_194616558.MP.jpg -> 1 face(s) (72ms)
+   + [55/60] kary/PXL_20250903_200921243.jpg -> 1 face(s) (74ms)
+   + [56/60] kary/PXL_20250905_181426418.jpg -> 1 face(s) (76ms)
+   . [57/60] kary/PXL_20250905_185526741.jpg -> 0 faces (70ms)
+   + [58/60] kary/PXL_20260116_205723070.jpg -> 1 face(s) (76ms)
+   + [59/60] kary/PXL_20260116_205725487.jpg -> 1 face(s) (75ms)
+   + [60/60] kary/PXL_20260202_145826483.MP.jpg -> 1 face(s) (71ms)
+
+# Detection summary (4.36s):
+   anuj                     images=  30  faces=  48  zero-face-images=  1 (97% hit)  avg-faces-per-hit=1.66
+   kary                     images=  30  faces=  41  zero-face-images=  1 (97% hit)  avg-faces-per-hit=1.41
+   TOTAL                    images=  60  faces=  89
+
+# DBSCAN over 89 embedding(s) (eps=0.5 minPts=2)
+   done in 20ms
+
+# DBSCAN -> 9 cluster(s), 15 noise (eps=0.5 minPts=2)
+
+   cluster_0   size= 31  by-folder=anuj:27, kary:4   sim[mean/min/max]=0.495/0.152/0.957
+      - anuj/20250526202235904.jpg face_idx=0 score=0.82
+      - anuj/AirBrush_20250701080658.jpg face_idx=0 score=0.88
+      - anuj/IMG-20241125-WA0008.jpg face_idx=1 score=0.82
+      - anuj/IMG-20241125-WA0028.jpg face_idx=1 score=0.73
+      - anuj/IMG_5983.JPG face_idx=0 score=0.89
+      - anuj/IMG_5984.JPG face_idx=0 score=0.95
+      - anuj/PXL_20221112_205831153.jpg face_idx=1 score=0.72
+      - anuj/PXL_20221213_062839047.jpg face_idx=0 score=0.62
+      - anuj/PXL_20230818_184459973.jpg face_idx=0 score=0.91
+      - anuj/PXL_20230818_184727230.MP.jpg face_idx=0 score=0.96
+      - anuj/PXL_20240205_153023234.jpg face_idx=1 score=0.79
+      - anuj/PXL_20240808_145412369.jpg face_idx=0 score=0.88
+      - anuj/PXL_20240929_204429198.MP.jpg face_idx=0 score=0.87
+      - anuj/PXL_20240929_204430516.MP.jpg face_idx=0 score=0.84
+      - anuj/PXL_20241214_025323469.jpg face_idx=0 score=0.90
+      - anuj/PXL_20250228_041424576.jpg face_idx=0 score=0.87
+      - anuj/PXL_20250228_041430183.jpg face_idx=0 score=0.85
+      - anuj/PXL_20250301_081233080.jpg face_idx=0 score=0.89
+      - anuj/PXL_20250301_081238880.jpg face_idx=0 score=0.74
+      - anuj/PXL_20250302_122652927.jpg face_idx=1 score=0.70
+      - anuj/PXL_20250302_122657446.jpg face_idx=1 score=0.72
+      - anuj/PXL_20250308_225117937.jpg face_idx=0 score=0.76
+      - anuj/PXL_20250612_221242470.jpg face_idx=0 score=0.79
+      - anuj/PXL_20250728_211923220.jpg face_idx=0 score=0.85
+      - anuj/PXL_20250905_185448760.jpg face_idx=1 score=0.73
+      - anuj/PXL_20251023_234020826.jpg face_idx=0 score=0.84
+      - anuj/PXL_20251221_060912561.MP.jpg face_idx=0 score=0.85
+      - kary/IMG-20241125-WA0007.jpg face_idx=1 score=0.78
+      - kary/IMG_6002.JPG face_idx=0 score=0.92
+      - kary/IMG_6004.JPG face_idx=0 score=0.91
+      - kary/PXL_20240205_140150315.jpg face_idx=1 score=0.77
+   cluster_1   size= 26  by-folder=kary:21, anuj:5   sim[mean/min/max]=0.614/0.300/0.955
+      - anuj/IMG-20241125-WA0008.jpg face_idx=0 score=0.91
+      - anuj/IMG-20241125-WA0028.jpg face_idx=0 score=0.79
+      - anuj/PXL_20240205_153023234.jpg face_idx=0 score=0.84
+      - anuj/PXL_20250328_043748660.jpg face_idx=0 score=0.90
+      - anuj/PXL_20250328_043750292.jpg face_idx=1 score=0.87
+      - kary/FB_IMG_1747972387449.jpg face_idx=0 score=0.84
+      - kary/IMG-20241125-WA0007.jpg face_idx=0 score=0.85
+      - kary/IMG_5756.JPG face_idx=0 score=0.92
+      - kary/IMG_5837.JPG face_idx=0 score=0.94
+      - kary/IMG_5838.JPG face_idx=0 score=0.92
+      - kary/IMG_6002.JPG face_idx=1 score=0.89
+      - kary/IMG_6004.JPG face_idx=1 score=0.90
+      - kary/IMG_6333.JPG face_idx=0 score=0.97
+      - kary/PXL_20230817_034256638.MP.jpg face_idx=0 score=0.83
+      - kary/PXL_20230819_201950474.jpg face_idx=0 score=0.95
+      - kary/PXL_20230819_204017849.PORTRAIT.jpg face_idx=0 score=0.90
+      - kary/PXL_20230913_200208998.MP.jpg face_idx=0 score=0.94
+      - kary/PXL_20231102_192109012.jpg face_idx=0 score=0.90
+      - kary/PXL_20240205_140150315.jpg face_idx=0 score=0.95
+      - kary/PXL_20240207_180305760.jpg face_idx=0 score=0.88
+      - kary/PXL_20240929_204246244.MP.jpg face_idx=0 score=0.97
+      - kary/PXL_20240929_204252621.MP.jpg face_idx=0 score=0.97
+      - kary/PXL_20241116_235913524.jpg face_idx=0 score=0.93
+      - kary/PXL_20241214_025308751.jpg face_idx=0 score=0.91
+      - kary/PXL_20241214_025348670.MP.jpg face_idx=0 score=0.91
+      - kary/PXL_20260202_145826483.MP.jpg face_idx=0 score=0.93
+   cluster_2   size=  5  by-folder=anuj:5   sim[mean/min/max]=0.615/0.437/0.817
+      - anuj/IMG_5983.JPG face_idx=1 score=0.88
+      - anuj/IMG_5984.JPG face_idx=1 score=0.91
+      - anuj/PXL_20221112_205831153.jpg face_idx=0 score=0.89
+      - anuj/PXL_20250302_122652927.jpg face_idx=0 score=0.79
+      - anuj/PXL_20250302_122657446.jpg face_idx=0 score=0.84
+   cluster_3   size=  2  by-folder=anuj:2   sim[mean/min/max]=0.931/0.931/0.931
+      - anuj/PXL_20250328_043748660.jpg face_idx=1 score=0.85
+      - anuj/PXL_20250328_043750292.jpg face_idx=2 score=0.87
+   cluster_4   size=  2  by-folder=anuj:2   sim[mean/min/max]=0.655/0.655/0.655
+      - anuj/PXL_20250328_043748660.jpg face_idx=2 score=0.81
+      - anuj/PXL_20250328_043750292.jpg face_idx=0 score=0.87
+   cluster_5   size=  2  by-folder=anuj:2   sim[mean/min/max]=0.648/0.648/0.648
+      - anuj/PXL_20250328_043748660.jpg face_idx=3 score=0.80
+      - anuj/PXL_20250328_043750292.jpg face_idx=3 score=0.80
+   cluster_6   size=  2  by-folder=anuj:2   sim[mean/min/max]=0.556/0.556/0.556
+      - anuj/PXL_20250328_043748660.jpg face_idx=4 score=0.75
+      - anuj/PXL_20250328_043750292.jpg face_idx=5 score=0.61
+   cluster_7   size=  2  by-folder=anuj:2   sim[mean/min/max]=0.636/0.636/0.636
+      - anuj/PXL_20250328_043748660.jpg face_idx=5 score=0.71
+      - anuj/PXL_20250328_043750292.jpg face_idx=4 score=0.63
+   cluster_8   size=  2  by-folder=kary:2   sim[mean/min/max]=0.899/0.899/0.899
+      - kary/IMG_5837.JPG face_idx=1 score=0.84
+      - kary/IMG_5838.JPG face_idx=1 score=0.87
+
+   noise  (15 singleton face(s) -- did not cluster with anyone)
+      [anuj] 1 face(s):
+         - PXL_20250905_185448760.jpg face_idx=0 score=0.89
+      [kary] 14 face(s):
+         - IMG_5837.JPG face_idx=2 score=0.80
+         - IMG_5838.JPG face_idx=2 score=0.67
+         - IMG_6333.JPG face_idx=1 score=0.88
+         - IMG_6333.JPG face_idx=2 score=0.82
+         - IMG_6333.JPG face_idx=3 score=0.70
+         - PXL_20231102_191628260.jpg face_idx=0 score=0.90
+         - PXL_20231102_192109012.jpg face_idx=1 score=0.83
+         - PXL_20241123_215329189.MP.jpg face_idx=0 score=0.76
+         - PXL_20250601_232113781.MP.jpg face_idx=0 score=0.75
+         - PXL_20250706_194616558.MP.jpg face_idx=0 score=0.67
+         - PXL_20250903_200921243.jpg face_idx=0 score=0.69
+         - PXL_20250905_181426418.jpg face_idx=0 score=0.64
+         - PXL_20260116_205723070.jpg face_idx=0 score=0.83
+         - PXL_20260116_205725487.jpg face_idx=0 score=0.89
+
+# Output bundle written to /Users/gifty/Development/FaceMesh/clusters_eps50_2
+   report.json     (92,338 bytes)
+   aligned/        (89 aligned 112x112 PNG(s))
+   cluster_NN/     (9 cluster dir(s) of symlinks)
+   noise/          (15 noise symlink(s))
+
+
+---
+
+**Cursor**
+
+This run matches what we wanted **dedupe** to do.
+
+## Dedupe acted on exactly the duplicated bytes
+
+Three **`kary` copies** were dropped because they matched **`anuj`** byte-for-byte:
+
+- Two **6-person** frames → **12** duplicate face rows gone  
+- One **2-person** frame → **2** duplicate face rows gone  
+
+So **103 → 89** faces and **63 → 60** images is consistent.
+
+You also avoid the bogus **cross-folder twins** (`anuj/foo` paired 1:1 with `kary/foo` at cosine 1). Those were **evaluation noise**, not new identities.
+
+## Clustering afterward
+
+**9 clusters (−1 vs eps 0.5 without dedupe)** is mostly losing those artifact pair-clusters plus a small DBSCAN rewiring — not a fundamentally different pipeline.
+
+The **same high-level split** remains:
+
+| Cluster | Rough story |
+|--------|-------------|
+| **`cluster_0`** | Mostly **your** folder, with a few **`kary`** faces — consistent with mixed shots labelled by who “owns” the file. |
+| **`cluster_1`** | Mostly **her** folder, with a few **yours**. |
+| **`cluster_2`** | Compact **your**-only bundle (solo / consistent pose corridor). |
+| **`cluster_3`–`cluster_7`** | Still **pairs** drawn from the **same two multi-face PXL scenes** (`face_idx` across the **043748660** / **043750292** pair). Duplicate **file** halves are gone, but duplicate **situation** (same event, aligned seats) keeps some faces linking only pairwise at this `eps`. |
+| **`cluster_8`** | Same third person **`IMG_5837`/`5838`** `face_idx=1` — stable. |
+
+**Noise 15**: same story as before — hard crops / angle / occlusion / weaker link to either big blob.
+
+## Practical note
+
+Dedupe only removes **exact** duplicate **files**. **Same evening, same pose, exported twice** from two phones with **different JPEG recompression** will **not** hash the same — you’d still get two embeddings unless you later add perceptual hashing or “same Album / burst” grouping.
+
+Overall: **`clusters_eps50_2`** is the right baseline to compare against **non‑deduped** runs; the remaining structure is dominated by **real identity + pose/lighting variance**, not **double-counted disks**.
 
