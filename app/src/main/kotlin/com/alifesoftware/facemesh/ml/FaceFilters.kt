@@ -1,6 +1,7 @@
 package com.alifesoftware.facemesh.ml
 
 import android.util.Log
+import com.alifesoftware.facemesh.config.PipelineConfig
 import kotlin.math.abs
 
 /**
@@ -9,8 +10,10 @@ import kotlin.math.abs
  *   1. Confidence threshold (already applied by [BlazeFaceDecoder] but re-applied here so
  *      callers can tune).
  *   2. Geometric sanity: eye-to-eye distance vs box width must look human.
- *   3. Size-outlier: keep faces within \u00b1 sizeBandFraction of the median width when more than
- *      one face is present.
+ *   3. Size-outlier: keep faces within +/- sizeBandFraction of the median width when between
+ *      two and (groupPhotoSizeBandSkipThreshold - 1) faces are present. Skipped entirely for
+ *      group photos (n >= groupPhotoSizeBandSkipThreshold) where wide variance in face size is
+ *      the norm and the median ceases to be a reliable "real face" anchor.
  */
 object FaceFilters {
 
@@ -18,15 +21,16 @@ object FaceFilters {
 
     fun apply(
         faces: List<DetectedFace>,
-        confidenceThreshold: Float = 0.75f,
-        eyeWidthRatioMin: Float = 0.25f,
-        eyeWidthRatioMax: Float = 0.65f,
-        sizeBandFraction: Float = 1.0f, // \u00b1 100% \u2192 \u00b1 2sigma typical; tune empirically
+        confidenceThreshold: Float = PipelineConfig.Filters.confidenceThreshold,
+        eyeWidthRatioMin: Float = PipelineConfig.Filters.eyeWidthRatioMin,
+        eyeWidthRatioMax: Float = PipelineConfig.Filters.eyeWidthRatioMax,
+        sizeBandFraction: Float = PipelineConfig.Filters.sizeBandFraction,
+        groupPhotoSizeBandSkipThreshold: Int = PipelineConfig.Filters.groupPhotoSizeBandSkipThreshold,
     ): List<DetectedFace> {
         Log.i(
             TAG,
             "apply: input=${faces.size} confTh=$confidenceThreshold eyeRatio=[$eyeWidthRatioMin..$eyeWidthRatioMax] " +
-                "sizeBand=$sizeBandFraction",
+                "sizeBand=$sizeBandFraction groupSkip>=$groupPhotoSizeBandSkipThreshold",
         )
         if (faces.isEmpty()) {
             Log.i(TAG, "apply: empty input -> early return empty")
@@ -75,6 +79,15 @@ object FaceFilters {
 
         if (byGeometry.size <= 1) {
             Log.i(TAG, "apply: skipping size-band filter (n<=1); early return ${byGeometry.size}")
+            return byGeometry
+        }
+        if (byGeometry.size >= groupPhotoSizeBandSkipThreshold) {
+            Log.i(
+                TAG,
+                "apply: skipping size-band filter (n=${byGeometry.size} >= " +
+                    "groupPhotoSizeBandSkipThreshold=$groupPhotoSizeBandSkipThreshold); " +
+                    "treating as group photo, early return ${byGeometry.size}",
+            )
             return byGeometry
         }
 

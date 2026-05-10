@@ -3,6 +3,7 @@ package com.alifesoftware.facemesh.ml
 import android.content.Context
 import android.os.SystemClock
 import android.util.Log
+import com.alifesoftware.facemesh.config.PipelineConfig
 import com.google.android.gms.tflite.client.TfLiteInitializationOptions
 import com.google.android.gms.tflite.gpu.support.TfLiteGpu
 import com.google.android.gms.tflite.java.TfLite
@@ -47,7 +48,10 @@ class TfLiteRuntime private constructor(
      * Caller is responsible for closing the returned [InterpreterApi] (typically wrapped in a
      * `use` block or held by a long-lived component such as [FaceDetector] / [FaceEmbedder]).
      */
-    fun newInterpreter(model: ByteBuffer, numThreads: Int = 2): InterpreterApi {
+    fun newInterpreter(
+        model: ByteBuffer,
+        numThreads: Int = PipelineConfig.Detector.interpreterThreads,
+    ): InterpreterApi {
         val options = InterpreterApi.Options().apply {
             setRuntime(InterpreterApi.Options.TfLiteRuntime.FROM_SYSTEM_ONLY)
             if (gpuAvailable) {

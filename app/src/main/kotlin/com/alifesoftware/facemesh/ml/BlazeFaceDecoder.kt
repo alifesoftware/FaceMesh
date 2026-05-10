@@ -3,6 +3,7 @@ package com.alifesoftware.facemesh.ml
 import android.graphics.PointF
 import android.graphics.RectF
 import android.util.Log
+import com.alifesoftware.facemesh.config.PipelineConfig
 import kotlin.math.exp
 import kotlin.math.max
 import kotlin.math.min
@@ -18,10 +19,10 @@ import kotlin.math.min
  * Classifications per anchor: 1 logit (sigmoid'd to score).
  */
 class BlazeFaceDecoder(
-    private val inputSize: Int = 128,
+    private val inputSize: Int = PipelineConfig.Detector.inputSize,
     private val anchors: Array<BlazeFaceAnchors.Anchor> = BlazeFaceAnchors.FRONT_128,
-    private val scoreThreshold: Float = 0.75f,
-    private val iouThreshold: Float = 0.30f,
+    private val scoreThreshold: Float = PipelineConfig.Detector.scoreThreshold,
+    private val iouThreshold: Float = PipelineConfig.Detector.nmsIouThreshold,
 ) {
 
     /**
@@ -36,8 +37,8 @@ class BlazeFaceDecoder(
         sourceWidth: Int,
         sourceHeight: Int,
     ): List<DetectedFace> {
-        require(regressors.size == anchors.size * REG_STRIDE) {
-            "regressors size ${regressors.size} != ${anchors.size * REG_STRIDE}"
+        require(regressors.size == anchors.size * PipelineConfig.Detector.regStride) {
+            "regressors size ${regressors.size} != ${anchors.size * PipelineConfig.Detector.regStride}"
         }
         require(classifications.size == anchors.size) {
             "classifications size ${classifications.size} != ${anchors.size}"
@@ -63,7 +64,7 @@ class BlazeFaceDecoder(
                 continue
             }
             val anchor = anchors[i]
-            val base = i * REG_STRIDE
+            val base = i * PipelineConfig.Detector.regStride
 
             // Box center is anchor center + offset/inputSize in normalised coords, then * size.
             val cx = (anchor.cx + regressors[base + 0] / inputSize) * inputSize
@@ -233,7 +234,6 @@ class BlazeFaceDecoder(
 
     companion object {
         private const val TAG: String = "FaceMesh.Decoder.Anchor"
-        const val REG_STRIDE: Int = 16
         fun sigmoid(x: Float): Float = 1f / (1f + exp((-x).toDouble())).toFloat()
     }
 }

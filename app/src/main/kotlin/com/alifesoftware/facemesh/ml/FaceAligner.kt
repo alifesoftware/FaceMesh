@@ -5,6 +5,7 @@ import android.graphics.Canvas
 import android.graphics.Matrix
 import android.graphics.Paint
 import android.util.Log
+import com.alifesoftware.facemesh.config.PipelineConfig
 
 /**
  * Affinely aligns a face crop into the canonical 112x112 pose used by GhostFaceNet
@@ -15,7 +16,7 @@ import android.util.Log
  * canonical ArcFace-style template normalised to 112x112.
  */
 class FaceAligner(
-    private val outputSize: Int = OUTPUT_SIZE,
+    private val outputSize: Int = PipelineConfig.Aligner.outputSize,
 ) {
 
     private val paint = Paint(Paint.FILTER_BITMAP_FLAG)
@@ -36,13 +37,14 @@ class FaceAligner(
                 "nose=(${"%.1f".format(face.landmarks.noseTip.x)},${"%.1f".format(face.landmarks.noseTip.y)}) " +
                 "mouth=(${"%.1f".format(face.landmarks.mouthCenter.x)},${"%.1f".format(face.landmarks.mouthCenter.y)})",
         )
+        val canonical = PipelineConfig.Aligner.canonicalLandmarkTemplate
         Log.i(
             TAG,
             "align: dst canonical " +
-                "rightEye=(${canonicalDestination[0]},${canonicalDestination[1]}) " +
-                "leftEye=(${canonicalDestination[2]},${canonicalDestination[3]}) " +
-                "nose=(${canonicalDestination[4]},${canonicalDestination[5]}) " +
-                "mouth=(${canonicalDestination[6]},${canonicalDestination[7]})",
+                "rightEye=(${canonical[0]},${canonical[1]}) " +
+                "leftEye=(${canonical[2]},${canonical[3]}) " +
+                "nose=(${canonical[4]},${canonical[5]}) " +
+                "mouth=(${canonical[6]},${canonical[7]})",
         )
         val src = floatArrayOf(
             face.landmarks.rightEye.x, face.landmarks.rightEye.y,
@@ -50,7 +52,7 @@ class FaceAligner(
             face.landmarks.noseTip.x, face.landmarks.noseTip.y,
             face.landmarks.mouthCenter.x, face.landmarks.mouthCenter.y,
         )
-        val dst = canonicalDestination
+        val dst = PipelineConfig.Aligner.canonicalLandmarkTemplate
         matrix.reset()
         val mapped = matrix.setPolyToPoly(src, 0, dst, 0, 4)
         if (!mapped) {
@@ -69,23 +71,5 @@ class FaceAligner(
 
     companion object {
         private const val TAG: String = "FaceMesh.Aligner"
-        const val OUTPUT_SIZE: Int = 112
-
-        /**
-         * ArcFace canonical landmark template (5-point), reduced to the 4 we use:
-         * right-eye, left-eye, nose, mouth-centre. Original mouth-corner pair (4,5) is averaged.
-         *
-         * Source: ArcFace authors' reference template at 112x112.
-         *   right_eye   = (38.2946, 51.6963)
-         *   left_eye    = (73.5318, 51.5014)
-         *   nose        = (56.0252, 71.7366)
-         *   mouth_center = mean( (41.5493, 92.3655), (70.7299, 92.2041) ) = (56.1396, 92.2848)
-         */
-        private val canonicalDestination: FloatArray = floatArrayOf(
-            38.2946f, 51.6963f,
-            73.5318f, 51.5014f,
-            56.0252f, 71.7366f,
-            56.1396f, 92.2848f,
-        )
     }
 }

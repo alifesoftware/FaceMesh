@@ -6,6 +6,7 @@ import android.graphics.RectF
 import android.net.Uri
 import android.os.SystemClock
 import android.util.Log
+import com.alifesoftware.facemesh.config.PipelineConfig
 import com.alifesoftware.facemesh.media.BitmapDecoder
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -30,7 +31,7 @@ class FaceProcessor(
         val embedding: FloatArray,
         /**
          * A *natural* (un-warped) square crop of the source bitmap, centred on the face
-         * bounding box with [DISPLAY_CROP_PADDING_FRACTION] padding on each side. Suitable for
+         * bounding box with [PipelineConfig.DisplayCrop.paddingFraction] padding on each side. Suitable for
          * use as the cluster's avatar thumbnail. Distinct from the affine-aligned 112\u00d7112 crop
          * that goes into the embedder \u2014 that crop is recycled before this record is returned.
          *
@@ -116,12 +117,6 @@ class FaceProcessor(
     companion object {
         private const val TAG: String = "FaceMesh.Processor"
 
-        /** ~30% padding around the face bounding box on each side for the display thumbnail. */
-        const val DISPLAY_CROP_PADDING_FRACTION: Float = 0.30f
-
-        /** Cap on the largest output dimension of the saved display crop (PNG on disk). */
-        const val DISPLAY_CROP_MAX_DIM: Int = 256
-
         /**
          * Produce a square, padded, *natural-pose* crop of [source] around [bbox]. The crop is
          * shifted (rather than letterboxed) when the padded square would clip past the edge of
@@ -132,8 +127,8 @@ class FaceProcessor(
         internal fun cropDisplayThumbnail(
             source: Bitmap,
             bbox: RectF,
-            paddingFraction: Float = DISPLAY_CROP_PADDING_FRACTION,
-            maxOutputDim: Int = DISPLAY_CROP_MAX_DIM,
+            paddingFraction: Float = PipelineConfig.DisplayCrop.paddingFraction,
+            maxOutputDim: Int = PipelineConfig.DisplayCrop.maxOutputDim,
         ): Bitmap? {
             if (source.width < 4 || source.height < 4) {
                 Log.w(TAG, "cropDisplayThumbnail: source too small (${source.width}x${source.height}); returning null")

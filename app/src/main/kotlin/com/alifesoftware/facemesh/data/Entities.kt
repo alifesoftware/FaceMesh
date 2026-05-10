@@ -8,7 +8,11 @@ import androidx.room.PrimaryKey
 /**
  * Persistence layer entity for a face cluster.
  *
- * The 128-d centroid is stored as a little-endian `FloatArray` blob via [FloatArrayConverter].
+ * The centroid (length [com.alifesoftware.facemesh.config.PipelineConfig.Embedder.embeddingDim],
+ * currently 512 for GhostFaceNet-V1; the SPEC's original "128-d" reference was for the
+ * MobileFaceNet baseline that has since been replaced) is stored as a little-endian
+ * `FloatArray` blob via [FloatArrayConverter].
+ *
  * UI-facing model lives in [com.alifesoftware.facemesh.domain.model.Cluster].
  */
 @Entity(tableName = "cluster")

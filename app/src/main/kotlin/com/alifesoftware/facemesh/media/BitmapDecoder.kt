@@ -8,6 +8,7 @@ import android.net.Uri
 import android.os.SystemClock
 import android.util.Log
 import androidx.exifinterface.media.ExifInterface
+import com.alifesoftware.facemesh.config.PipelineConfig
 import java.io.IOException
 import kotlin.math.max
 
@@ -15,7 +16,8 @@ import kotlin.math.max
  * Loads images from `content://` URIs with controlled memory usage:
  *   \u2022 Two-pass decode (bounds first, then sample-sized).
  *   \u2022 EXIF rotation honored.
- *   \u2022 Largest dimension capped at [MAX_DIM] to satisfy SPEC FR-35 / NFR-04.
+ *   \u2022 Largest dimension capped at [PipelineConfig.Decode.maxLongEdgePx] to satisfy
+ *     SPEC FR-35 / NFR-04.
  *
  * Phase 2 surface; Phase 4 calls into this for detection input.
  */
@@ -23,10 +25,12 @@ object BitmapDecoder {
 
     private const val TAG = "FaceMesh.Decoder"
 
-    const val MAX_DIM: Int = 1280
-
     @Throws(IOException::class)
-    fun decode(resolver: ContentResolver, uri: Uri, maxDim: Int = MAX_DIM): Bitmap {
+    fun decode(
+        resolver: ContentResolver,
+        uri: Uri,
+        maxDim: Int = PipelineConfig.Decode.maxLongEdgePx,
+    ): Bitmap {
         val started = SystemClock.elapsedRealtime()
         Log.i(TAG, "decode: start uri=$uri maxDim=$maxDim")
         val (w, h) = readBounds(resolver, uri)

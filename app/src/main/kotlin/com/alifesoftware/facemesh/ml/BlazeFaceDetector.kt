@@ -6,6 +6,7 @@ import android.graphics.Matrix
 import android.graphics.Paint
 import android.os.SystemClock
 import android.util.Log
+import com.alifesoftware.facemesh.config.PipelineConfig
 import org.tensorflow.lite.InterpreterApi
 import java.io.Closeable
 import java.io.File
@@ -21,7 +22,7 @@ class BlazeFaceDetector(
     private val runtime: TfLiteRuntime,
     modelFile: File,
     private val decoder: BlazeFaceDecoder = BlazeFaceDecoder(),
-    private val inputSize: Int = 128,
+    private val inputSize: Int = PipelineConfig.Detector.inputSize,
 ) : Closeable {
 
     private val interpreter: InterpreterApi = runtime.newInterpreter(runtime.loadModel(modelFile))
@@ -69,8 +70,8 @@ class BlazeFaceDetector(
         )
         Log.i(
             TAG,
-            "init: ready inputSize=${inputSize}x${inputSize}x3 anchors=$NUM_ANCHORS " +
-                "regStride=${BlazeFaceDecoder.REG_STRIDE} delegate=${runtime.activeDelegate}",
+            "init: ready inputSize=${inputSize}x${inputSize}x3 anchors=${PipelineConfig.Detector.numAnchors} " +
+                "regStride=${PipelineConfig.Detector.regStride} delegate=${runtime.activeDelegate}",
         )
     }
 
@@ -78,8 +79,12 @@ class BlazeFaceDetector(
     private val inputBuffer: ByteBuffer = ByteBuffer
         .allocateDirect(inputSize * inputSize * 3 * Float.SIZE_BYTES)
         .order(ByteOrder.nativeOrder())
-    private val regOutput: Array<Array<FloatArray>> = Array(1) { Array(NUM_ANCHORS) { FloatArray(BlazeFaceDecoder.REG_STRIDE) } }
-    private val clsOutput: Array<Array<FloatArray>> = Array(1) { Array(NUM_ANCHORS) { FloatArray(1) } }
+    private val regOutput: Array<Array<FloatArray>> = Array(1) {
+        Array(PipelineConfig.Detector.numAnchors) { FloatArray(PipelineConfig.Detector.regStride) }
+    }
+    private val clsOutput: Array<Array<FloatArray>> = Array(1) {
+        Array(PipelineConfig.Detector.numAnchors) { FloatArray(1) }
+    }
     private val outputs: MutableMap<Int, Any> = mutableMapOf()
     private val resizePaint = Paint(Paint.FILTER_BITMAP_FLAG)
 
@@ -115,11 +120,13 @@ class BlazeFaceDetector(
         }
         val inferMs = SystemClock.elapsedRealtime() - inferStart
 
-        val regs = FloatArray(NUM_ANCHORS * BlazeFaceDecoder.REG_STRIDE)
-        for (i in 0 until NUM_ANCHORS) {
-            System.arraycopy(regOutput[0][i], 0, regs, i * BlazeFaceDecoder.REG_STRIDE, BlazeFaceDecoder.REG_STRIDE)
+        val numAnchors = PipelineConfig.Detector.numAnchors
+        val regStride = PipelineConfig.Detector.regStride
+        val regs = FloatArray(numAnchors * regStride)
+        for (i in 0 until numAnchors) {
+            System.arraycopy(regOutput[0][i], 0, regs, i * regStride, regStride)
         }
-        val cls = FloatArray(NUM_ANCHORS) { clsOutput[0][it][0] }
+        val cls = FloatArray(numAnchors) { clsOutput[0][it][0] }
 
         // Logit distribution stats so we can spot dead/saturated outputs without spamming per-anchor lines.
         var logitMin = Float.POSITIVE_INFINITY
@@ -130,7 +137,7 @@ class BlazeFaceDetector(
         var aboveHalfSig = 0     // sigmoid > 0.75 (typical detector threshold), i.e. logit > ~1.0986
         var topLogit = Float.NEGATIVE_INFINITY
         var topLogitIndex = -1
-        for (i in 0 until NUM_ANCHORS) {
+        for (i in 0 until numAnchors) {
             val v = cls[i]
             if (v < logitMin) logitMin = v
             if (v > logitMax) {
@@ -142,16 +149,16 @@ class BlazeFaceDetector(
             if (v > 0f) { posCount++; aboveZeroSig++ }
             if (v > 1.0986123f) aboveHalfSig++
         }
-        val logitMean = (logitSum / NUM_ANCHORS).toFloat()
+        val logitMean = (logitSum / numAnchors).toFloat()
         Log.i(
             TAG,
-            "detect: inference done prep=${prepMs}ms infer=${inferMs}ms anchors=$NUM_ANCHORS " +
+            "detect: inference done prep=${prepMs}ms infer=${inferMs}ms anchors=$numAnchors " +
                 "logits[min/mean/max]=${"%.3f".format(logitMin)}/${"%.3f".format(logitMean)}/" +
                 "${"%.3f".format(logitMax)} positive=$posCount sigmoidGt0.5=$aboveZeroSig " +
                 "sigmoidGt0.75=$aboveHalfSig topAnchor=$topLogitIndex(logit=${"%.3f".format(topLogit)})",
         )
         if (topLogitIndex >= 0) {
-            val base = topLogitIndex * BlazeFaceDecoder.REG_STRIDE
+            val base = topLogitIndex * regStride
             Log.i(
                 TAG,
                 "detect: topAnchor[$topLogitIndex] regressor dx=${"%.2f".format(regs[base])} " +
@@ -258,6 +265,5 @@ class BlazeFaceDetector(
 
     companion object {
         private const val TAG: String = "FaceMesh.Detector"
-        const val NUM_ANCHORS: Int = 896
     }
 }

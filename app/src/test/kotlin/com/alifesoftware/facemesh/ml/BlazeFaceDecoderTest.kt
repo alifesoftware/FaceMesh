@@ -1,5 +1,6 @@
 package com.alifesoftware.facemesh.ml
 
+import com.alifesoftware.facemesh.config.PipelineConfig
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -32,7 +33,7 @@ class BlazeFaceDecoderTest {
             anchors = anchors,
             scoreThreshold = 0.9f,
         )
-        val regs = FloatArray(BlazeFaceDecoder.REG_STRIDE) // box centred, w/h = 0
+        val regs = FloatArray(PipelineConfig.Detector.regStride) // box centred, w/h = 0
         val logits = floatArrayOf(0f) // sigmoid(0) = 0.5 < 0.9
         val out = decoder.decode(regs, logits, sourceWidth = 100, sourceHeight = 100)
         assertEquals(0, out.size)
@@ -46,7 +47,7 @@ class BlazeFaceDecoderTest {
             anchors = anchors,
             scoreThreshold = 0.5f,
         )
-        val regs = FloatArray(BlazeFaceDecoder.REG_STRIDE).apply {
+        val regs = FloatArray(PipelineConfig.Detector.regStride).apply {
             // Centre offset = 0, w = 60, h = 60, so the box is (20, 20, 80, 80) in input space.
             this[2] = 60f
             this[3] = 60f
@@ -83,7 +84,7 @@ class BlazeFaceDecoderTest {
             scoreThreshold = 0.5f,
             iouThreshold = 0.30f,
         )
-        val perAnchor = FloatArray(BlazeFaceDecoder.REG_STRIDE).apply {
+        val perAnchor = FloatArray(PipelineConfig.Detector.regStride).apply {
             this[2] = 60f
             this[3] = 60f
         }

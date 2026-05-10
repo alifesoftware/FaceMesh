@@ -49,9 +49,14 @@ class ClusterifyUseCase(
         }
 
         val eps = preferences.dbscanEps.first()
+        val epsSource = preferences.dbscanEpsSource.first()
         val minPts = preferences.dbscanMinPts.first()
         val createdAt = System.currentTimeMillis()
-        Log.i(TAG, "run: config eps=$eps minPts=$minPts createdAt=$createdAt")
+        Log.i(
+            TAG,
+            "run: config eps=$eps(source=$epsSource) minPts=$minPts(source=MANIFEST_OR_DEFAULT) " +
+                "createdAt=$createdAt",
+        )
         val phaseStart = SystemClock.elapsedRealtime()
 
         val records = ArrayList<FaceProcessor.FaceRecord>(sources.size * 2)

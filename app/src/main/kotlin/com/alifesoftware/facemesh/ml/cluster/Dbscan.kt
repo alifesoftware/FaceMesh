@@ -2,6 +2,7 @@ package com.alifesoftware.facemesh.ml.cluster
 
 import android.os.SystemClock
 import android.util.Log
+import com.alifesoftware.facemesh.config.PipelineConfig
 
 /**
  * Density-based spatial clustering (DBSCAN) using cosine distance over L2-normalised face
@@ -127,7 +128,18 @@ class Dbscan(
 
     companion object {
         private const val TAG: String = "FaceMesh.Dbscan"
-        const val UNVISITED: Int = -2
-        const val NOISE: Int = -1
+
+        /**
+         * Re-exposed from [PipelineConfig.Clustering.unvisitedLabel] so the algorithm body can
+         * use a short local name. Update the canonical value in PipelineConfig if changed.
+         */
+        const val UNVISITED: Int = PipelineConfig.Clustering.unvisitedLabel
+
+        /**
+         * Re-exposed from [PipelineConfig.Clustering.noiseLabel] (also used by external callers
+         * such as [com.alifesoftware.facemesh.domain.ClusterifyUseCase] to filter out noise
+         * points after clustering).
+         */
+        const val NOISE: Int = PipelineConfig.Clustering.noiseLabel
     }
 }

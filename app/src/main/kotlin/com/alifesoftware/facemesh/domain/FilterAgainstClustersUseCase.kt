@@ -42,11 +42,12 @@ class FilterAgainstClustersUseCase(
         }
 
         val matchThreshold = preferences.matchThreshold.first()
+        val matchThresholdSource = preferences.matchThresholdSource.first()
         val centroids = clusterRepository.loadCentroidsForIds(selectedClusterIds).map { it.second }
         Log.i(
             TAG,
-            "run: matchThreshold=$matchThreshold loadedCentroids=${centroids.size} " +
-                "(requested=${selectedClusterIds.size})",
+            "run: matchThreshold=$matchThreshold(source=$matchThresholdSource) " +
+                "loadedCentroids=${centroids.size} (requested=${selectedClusterIds.size})",
         )
         if (centroids.isEmpty()) {
             Log.w(TAG, "run: no centroids resolved for selected cluster ids -> emitting Done(0)")

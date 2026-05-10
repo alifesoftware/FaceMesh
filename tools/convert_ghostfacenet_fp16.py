@@ -348,7 +348,7 @@ def main() -> None:
     print(f"  file path : {tflite_path}")
     print(f"  size_bytes: {tflite_path.stat().st_size}")
     print(f"  sha256    : {_sha256(tflite_path)}")
-    print(f"  embedding_dim: {int(out_details['shape'][-1])}  <- update FaceEmbedder.EMBEDDING_SIZE if != 128")
+    print(f"  embedding_dim: {int(out_details['shape'][-1])}  <- update PipelineConfig.Embedder.embeddingDim if changed")
 
 
 if __name__ == "__main__":

@@ -60,4 +60,17 @@
     <string name="settings_dynamic_color_title">Use system wallpaper colors</string>
     <string name="settings_dynamic_color_subtitle">Override the FaceMesh brand palette with Material You colors derived from your current wallpaper.</string>
     <string name="settings_dynamic_color_unavailable">Requires Android 12 or newer.</string>
+
+    <!-- Settings: Pipeline tuning sliders -->
+    <string name="settings_section_pipeline">Pipeline tuning</string>
+    <string name="settings_pipeline_section_caption">Override the manifest values for cluster tightness and match strictness. Reset returns each value to the manifest default.</string>
+    <string name="settings_dbscan_eps_title">Cluster tightness</string>
+    <string name="settings_dbscan_eps_subtitle">Lower values produce tighter clusters (more "same person" splits). Higher values merge faces more eagerly.</string>
+    <string name="settings_match_threshold_title">Match strictness</string>
+    <string name="settings_match_threshold_subtitle">Lower values keep more photos (recall up). Higher values keep only stronger matches (precision up).</string>
+    <string name="settings_value_decimal">%1$.2f</string>
+    <string name="settings_value_with_source">%1$.2f (%2$s)</string>
+    <string name="settings_source_user">modified</string>
+    <string name="settings_source_manifest">manifest</string>
+    <string name="settings_source_default">default</string>
 </resources>

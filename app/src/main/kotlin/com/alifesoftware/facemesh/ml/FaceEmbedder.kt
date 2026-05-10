@@ -3,6 +3,7 @@ package com.alifesoftware.facemesh.ml
 import android.graphics.Bitmap
 import android.os.SystemClock
 import android.util.Log
+import com.alifesoftware.facemesh.config.PipelineConfig
 import com.alifesoftware.facemesh.ml.cluster.EmbeddingMath
 import org.tensorflow.lite.InterpreterApi
 import java.io.Closeable
@@ -26,8 +27,8 @@ import java.nio.ByteOrder
 class FaceEmbedder(
     private val runtime: TfLiteRuntime,
     modelFile: File,
-    private val inputSize: Int = INPUT_SIZE,
-    private val embeddingSize: Int = EMBEDDING_SIZE,
+    private val inputSize: Int = PipelineConfig.Embedder.inputSize,
+    private val embeddingSize: Int = PipelineConfig.Embedder.embeddingDim,
 ) : Closeable {
 
     private val interpreter: InterpreterApi = runtime.newInterpreter(runtime.loadModel(modelFile))
@@ -94,7 +95,5 @@ class FaceEmbedder(
 
     companion object {
         private const val TAG: String = "FaceMesh.Embedder"
-        const val INPUT_SIZE: Int = 112
-        const val EMBEDDING_SIZE: Int = 512
     }
 }
