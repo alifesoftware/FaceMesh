@@ -234,6 +234,12 @@ class BlazeFaceDecoder(
 
     companion object {
         private const val TAG: String = "FaceMesh.Decoder.Anchor"
-        fun sigmoid(x: Float): Float = 1f / (1f + exp((-x).toDouble())).toFloat()
+        /**
+         * Numerically-stable sigmoid: keeps the divide in Double space so a small `exp(-x)`
+         * doesn't lose precision against the `1.0` term before the cast back to Float. For our
+         * logit ranges (typically -20..+20) the visible Float result is unchanged, but the
+         * version preserves precision if the threshold tuning ever moves into the tails.
+         */
+        fun sigmoid(x: Float): Float = (1.0 / (1.0 + exp(-x.toDouble()))).toFloat()
     }
 }

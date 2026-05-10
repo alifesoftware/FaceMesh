@@ -57,7 +57,10 @@ class MlPipelineProvider(
     }
 
     private suspend fun ensureProcessor(): FaceProcessor {
-        mutex.withLock {
+        // Capture local refs INSIDE the mutex so a concurrent close() that nulls the fields
+        // can't sneak in between the lock release and the FaceProcessor constructor reads.
+        // Volatile alone wouldn't help here - only the mutex serialises build vs. teardown.
+        val (detLocal, alignLocal, embedLocal) = mutex.withLock {
             if (detector == null || embedder == null || aligner == null) {
                 val started = SystemClock.elapsedRealtime()
                 Log.i(TAG, "ensureProcessor: building ML graph (first call)")
@@ -89,12 +92,13 @@ class MlPipelineProvider(
                     "ensureProcessor: graph ready in ${SystemClock.elapsedRealtime() - started}ms",
                 )
             }
+            Triple(detector!!, aligner!!, embedder!!)
         }
         return FaceProcessor(
             resolver = context.contentResolver,
-            detector = detector!!,
-            aligner = aligner!!,
-            embedder = embedder!!,
+            detector = detLocal,
+            aligner = alignLocal,
+            embedder = embedLocal,
         )
     }
 

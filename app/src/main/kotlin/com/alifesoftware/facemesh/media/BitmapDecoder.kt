@@ -107,6 +107,17 @@ object BitmapDecoder {
             ExifInterface.ORIENTATION_ROTATE_270 -> matrix.postRotate(270f)
             ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> matrix.preScale(-1f, 1f)
             ExifInterface.ORIENTATION_FLIP_VERTICAL -> matrix.preScale(1f, -1f)
+            // EXIF 5 / 7 are the rare compound orientations (rotate + flip) that some
+            // scanners and panorama tools emit. Recipe matches Glide's well-tested
+            // initializeMatrixForRotation: rotate first, then post-scale -1 along X.
+            ExifInterface.ORIENTATION_TRANSPOSE -> matrix.apply {
+                postRotate(90f)
+                postScale(-1f, 1f)
+            }
+            ExifInterface.ORIENTATION_TRANSVERSE -> matrix.apply {
+                postRotate(-90f)
+                postScale(-1f, 1f)
+            }
             else -> {
                 Log.i(TAG, "applyExifRotation: orientation=$orientation, no transform applied")
                 return bitmap
