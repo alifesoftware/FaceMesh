@@ -1,6 +1,8 @@
 package com.alifesoftware.facemesh.viewmodel
 
 import android.net.Uri
+import android.os.SystemClock
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.alifesoftware.facemesh.data.AppPreferences
@@ -43,15 +45,25 @@ class HomeViewModel(
     val state: StateFlow<HomeUiState> = _state.asStateFlow()
 
     init {
+        Log.i(
+            TAG,
+            "init: VM created repo=${clusterRepository != null} prefs=${preferences != null} " +
+                "downloader=${modelDownloader != null} pipeline=${mlPipelineProvider != null} " +
+                "initialState=${_state.value::class.simpleName}",
+        )
         // Surface persisted clusters as the initial state on cold start (SPEC FR-13 persistence).
         clusterRepository?.let { repo ->
             viewModelScope.launch {
+                Log.i(TAG, "init: loading persisted clusters from repository...")
                 val saved = repo.loadClusters()
+                Log.i(TAG, "init: repo returned ${saved.size} cluster(s)")
                 if (saved.isNotEmpty() && _state.value is HomeUiState.Empty) {
-                    _state.value = HomeUiState.Clustered(
+                    transition("init/restorePersistedClusters", HomeUiState.Clustered(
                         clusters = saved,
                         selectedClusterIds = emptySet(),
-                    )
+                    ))
+                } else if (saved.isEmpty()) {
+                    Log.i(TAG, "init: no persisted clusters; staying in Empty")
                 }
             }
         }
@@ -66,6 +78,7 @@ class HomeViewModel(
     private var pipelineJob: Job? = null
 
     fun handle(intent: HomeIntent) {
+        Log.i(TAG, "handle: intent=${describe(intent)} curState=${describe(_state.value)}")
         when (intent) {
             HomeIntent.AddPhotosTapped -> { /* handled by UI launching the picker */ }
             is HomeIntent.PhotosPicked -> onPhotosPicked(intent.uris)
@@ -88,10 +101,42 @@ class HomeViewModel(
         }
     }
 
+    /** Centralised state setter so every transition gets logged with the [reason] tag. */
+    private fun transition(reason: String, next: HomeUiState) {
+        val prev = _state.value
+        if (prev === next || prev == next) {
+            Log.i(TAG, "transition[$reason]: no-op (state unchanged) ${describe(prev)}")
+            return
+        }
+        Log.i(TAG, "transition[$reason]: ${describe(prev)} -> ${describe(next)}")
+        _state.value = next
+    }
+
+    /** Same idea, but for in-place updates that may or may not actually change anything. */
+    private fun updateState(reason: String, block: (HomeUiState) -> HomeUiState) {
+        val prev = _state.value
+        val next = block(prev)
+        if (prev === next || prev == next) {
+            Log.i(TAG, "updateState[$reason]: no-op (state unchanged) ${describe(prev)}")
+            return
+        }
+        Log.i(TAG, "updateState[$reason]: ${describe(prev)} -> ${describe(next)}")
+        _state.value = next
+    }
+
+    private suspend fun emitMessage(reason: String, message: UiMessage) {
+        Log.i(TAG, "emitMessage[$reason]: $message")
+        _messages.emit(message)
+    }
+
     // \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 transitions \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
     private fun onPhotosPicked(uris: List<Uri>) {
-        if (uris.isEmpty()) return
-        _state.update { current ->
+        if (uris.isEmpty()) {
+            Log.i(TAG, "onPhotosPicked: empty selection -> ignore")
+            return
+        }
+        Log.i(TAG, "onPhotosPicked: received ${uris.size} uri(s) first=${uris.firstOrNull()}")
+        updateState("PhotosPicked") { current ->
             when (current) {
                 is HomeUiState.Empty -> HomeUiState.Selecting(
                     selectedPhotos = uris,
@@ -99,16 +144,27 @@ class HomeViewModel(
                 )
                 is HomeUiState.Selecting -> {
                     val merged = current.selectedPhotos + uris
+                    Log.i(
+                        TAG,
+                        "onPhotosPicked: merging into existing Selecting " +
+                            "${current.selectedPhotos.size}+${uris.size}=${merged.size}",
+                    )
                     HomeUiState.Selecting(
                         selectedPhotos = merged,
                         recentFan = merged.takeLast(MAX_FAN).reversed(),
                     )
                 }
-                is HomeUiState.Clustered -> HomeUiState.Selecting(
-                    selectedPhotos = uris,
-                    recentFan = uris.takeLast(MAX_FAN).reversed(),
-                )
-                else -> current
+                is HomeUiState.Clustered -> {
+                    Log.i(TAG, "onPhotosPicked: leaving Clustered, replacing selection with new batch")
+                    HomeUiState.Selecting(
+                        selectedPhotos = uris,
+                        recentFan = uris.takeLast(MAX_FAN).reversed(),
+                    )
+                }
+                else -> {
+                    Log.w(TAG, "onPhotosPicked: ignored in unexpected state ${describe(current)}")
+                    current
+                }
             }
         }
     }
@@ -116,31 +172,45 @@ class HomeViewModel(
     private suspend fun maybeShowGpuFallbackToastOnce() {
         val provider = mlPipelineProvider ?: return
         val prefs = preferences ?: return
+        Log.i(TAG, "maybeShowGpuFallbackToastOnce: activeDelegate=${provider.activeDelegate}")
         if (provider.activeDelegate == TfLiteRuntime.Delegate.XNNPACK) {
             val alreadyShown = prefs.gpuFallbackToastShown.first()
+            Log.i(TAG, "maybeShowGpuFallbackToastOnce: XNNPACK fallback active alreadyShown=$alreadyShown")
             if (!alreadyShown) {
-                _messages.emit(UiMessage.UsingCpuAcceleration)
+                emitMessage("gpuFallbackToast", UiMessage.UsingCpuAcceleration)
                 prefs.setGpuFallbackToastShown(true)
             }
         }
     }
 
     private fun onClusterifyTapped() {
-        val current = _state.value as? HomeUiState.Selecting ?: return
+        val current = _state.value as? HomeUiState.Selecting ?: run {
+            Log.w(TAG, "onClusterifyTapped: ignored, state is ${describe(_state.value)} (need Selecting)")
+            return
+        }
         val total = current.selectedPhotos.size
-        _state.value = HomeUiState.Processing(processed = 0, total = total, recentFan = current.recentFan)
+        Log.i(TAG, "onClusterifyTapped: starting Clusterify on $total photo(s)")
+        transition("Clusterify/start", HomeUiState.Processing(processed = 0, total = total, recentFan = current.recentFan))
 
         if (modelDownloader == null || mlPipelineProvider == null) {
-            // Tests / Phase-1 mock path
+            Log.i(TAG, "onClusterifyTapped: downloader/pipeline null -> running MOCK path")
             runMockClusterify(current.selectedPhotos, total)
             return
         }
 
         pipelineJob?.cancel()
+        Log.i(TAG, "onClusterifyTapped: launching real pipeline coroutine (cancelled any prior job)")
+        val launchedAt = SystemClock.elapsedRealtime()
         pipelineJob = viewModelScope.launch {
             ensureModelsAvailable() ?: return@launch
+            Log.i(
+                TAG,
+                "onClusterifyTapped: models OK; building ClusterifyUseCase " +
+                    "(${SystemClock.elapsedRealtime() - launchedAt}ms after launch)",
+            )
             val useCase = mlPipelineProvider.clusterifyUseCase()
             maybeShowGpuFallbackToastOnce()
+            Log.i(TAG, "onClusterifyTapped: starting useCase.run flow collection on ${current.selectedPhotos.size} uri(s)")
             useCase.run(current.selectedPhotos).collect { event ->
                 when (event) {
                     is ClusterifyUseCase.Event.Progress ->
@@ -151,6 +221,11 @@ class HomeViewModel(
                         handle(HomeIntent.ClusterifyFinished(event.clusters))
                 }
             }
+            Log.i(
+                TAG,
+                "onClusterifyTapped: useCase flow completed; total wallTime=" +
+                    "${SystemClock.elapsedRealtime() - launchedAt}ms",
+            )
         }
     }
 
@@ -159,39 +234,58 @@ class HomeViewModel(
      * Empty state + Snackbar in that case).
      */
     private suspend fun ensureModelsAvailable(): Boolean? {
-        val downloader = modelDownloader ?: return true
+        val downloader = modelDownloader ?: run {
+            Log.i(TAG, "ensureModelsAvailable: downloader null -> assuming OK (test path)")
+            return true
+        }
+        Log.i(TAG, "ensureModelsAvailable: starting downloader.ensureAvailable()")
+        val started = SystemClock.elapsedRealtime()
         var ok = false
         downloader.ensureAvailable().collect { progress ->
             when (progress) {
                 is ModelDownloadManager.Progress.AlreadyAvailable -> {
+                    Log.i(TAG, "ensureModelsAvailable: AlreadyAvailable v${progress.manifest.version}")
                     ok = true
                 }
                 is ModelDownloadManager.Progress.Started -> {
-                    _state.update { s -> if (s is HomeUiState.Processing) s.copy(downloadFraction = 0f) else s }
+                    Log.i(TAG, "ensureModelsAvailable: Started (totalBytes=${progress.totalBytes})")
+                    updateState("Download/started") { s ->
+                        if (s is HomeUiState.Processing) s.copy(downloadFraction = 0f) else s
+                    }
                 }
                 is ModelDownloadManager.Progress.Downloading -> {
-                    _state.update { s ->
+                    // Don't log every byte — the manager already logs per-model start/end.
+                    updateState("Download/progress") { s ->
                         if (s is HomeUiState.Processing) s.copy(downloadFraction = progress.approxFraction) else s
                     }
                 }
                 is ModelDownloadManager.Progress.Done -> {
+                    Log.i(TAG, "ensureModelsAvailable: Done v${progress.manifest.version}")
                     ok = true
-                    _state.update { s -> if (s is HomeUiState.Processing) s.copy(downloadFraction = null) else s }
+                    updateState("Download/done") { s ->
+                        if (s is HomeUiState.Processing) s.copy(downloadFraction = null) else s
+                    }
                 }
                 is ModelDownloadManager.Progress.Failed -> {
+                    Log.e(TAG, "ensureModelsAvailable: Failed target=${progress.target}")
                     ok = false
                 }
             }
         }
+        Log.i(
+            TAG,
+            "ensureModelsAvailable: collection done ok=$ok in ${SystemClock.elapsedRealtime() - started}ms",
+        )
         if (!ok) {
-            _messages.emit(UiMessage.ModelDownloadFailed)
-            _state.value = HomeUiState.Empty
+            emitMessage("Download/failed", UiMessage.ModelDownloadFailed)
+            transition("Download/failed", HomeUiState.Empty)
             return null
         }
         return true
     }
 
     private fun runMockClusterify(uris: List<Uri>, total: Int) {
+        Log.i(TAG, "runMockClusterify: total=$total")
         pipelineJob?.cancel()
         pipelineJob = viewModelScope.launch {
             uris.forEachIndexed { index, _ ->
@@ -204,6 +298,7 @@ class HomeViewModel(
     }
 
     private fun updateProcessing(processed: Int, total: Int) {
+        // Suppress per-image transition log; just update silently. Pipeline emits its own per-uri lines.
         _state.update { s ->
             when (s) {
                 is HomeUiState.Processing -> s.copy(processed = processed, total = total)
@@ -214,19 +309,22 @@ class HomeViewModel(
     }
 
     private fun finishClusterify(clusters: List<Cluster>) {
-        _state.value = HomeUiState.Clustered(
+        Log.i(TAG, "finishClusterify: producing Clustered with ${clusters.size} cluster(s)")
+        transition("Clusterify/finished", HomeUiState.Clustered(
             clusters = clusters,
             selectedClusterIds = emptySet(),
-        )
+        ))
     }
 
     private fun handleNoFaces() {
-        viewModelScope.launch { _messages.emit(UiMessage.NoFacesFound) }
-        _state.value = HomeUiState.Empty
+        Log.w(TAG, "handleNoFaces: pipeline reported no faces; surfacing toast and Empty")
+        viewModelScope.launch { emitMessage("noFaces", UiMessage.NoFacesFound) }
+        transition("Clusterify/noFaces", HomeUiState.Empty)
     }
 
     private fun onToggleCluster(id: String) {
-        _state.update { s ->
+        Log.i(TAG, "onToggleCluster: id=$id")
+        updateState("ToggleCluster") { s ->
             when (s) {
                 is HomeUiState.Clustered -> s.copy(
                     selectedClusterIds = s.selectedClusterIds.toggle(id),
@@ -234,18 +332,29 @@ class HomeViewModel(
                 is HomeUiState.FilterReady -> s.copy(
                     selectedClusterIds = s.selectedClusterIds.toggle(id),
                 )
-                else -> s
+                else -> {
+                    Log.w(TAG, "onToggleCluster: ignored in ${describe(s)}")
+                    s
+                }
             }
         }
     }
 
     private fun onFilterPhotosPicked(uris: List<Uri>) {
-        if (uris.isEmpty()) return
-        val capped = uris.take(MAX_FILTER_PHOTOS)
-        if (uris.size > MAX_FILTER_PHOTOS) {
-            viewModelScope.launch { _messages.emit(UiMessage.MaxFilterImagesReached) }
+        if (uris.isEmpty()) {
+            Log.i(TAG, "onFilterPhotosPicked: empty -> ignore")
+            return
         }
-        _state.update { s ->
+        val capped = uris.take(MAX_FILTER_PHOTOS)
+        Log.i(
+            TAG,
+            "onFilterPhotosPicked: received ${uris.size} (capped to ${capped.size}, max=$MAX_FILTER_PHOTOS)",
+        )
+        if (uris.size > MAX_FILTER_PHOTOS) {
+            Log.w(TAG, "onFilterPhotosPicked: user picked ${uris.size} > $MAX_FILTER_PHOTOS; emitting MaxFilterImagesReached")
+            viewModelScope.launch { emitMessage("maxFilterImages", UiMessage.MaxFilterImagesReached) }
+        }
+        updateState("FilterPhotosPicked") { s ->
             when (s) {
                 is HomeUiState.Clustered -> HomeUiState.FilterReady(
                     clusters = s.clusters,
@@ -253,32 +362,52 @@ class HomeViewModel(
                     filterPhotos = capped,
                 )
                 is HomeUiState.FilterReady -> s.copy(filterPhotos = capped)
-                else -> s
+                else -> {
+                    Log.w(TAG, "onFilterPhotosPicked: ignored in ${describe(s)}")
+                    s
+                }
             }
         }
     }
 
     private fun onFilterTapped() {
-        val current = _state.value as? HomeUiState.FilterReady ?: return
-        if (!current.canFilter) return
+        val current = _state.value as? HomeUiState.FilterReady ?: run {
+            Log.w(TAG, "onFilterTapped: ignored, state is ${describe(_state.value)} (need FilterReady)")
+            return
+        }
+        if (!current.canFilter) {
+            Log.w(
+                TAG,
+                "onFilterTapped: ignored, canFilter=false (filterPhotos=${current.filterPhotos.size}, " +
+                    "selectedClusters=${current.selectedClusterIds.size})",
+            )
+            return
+        }
         val total = current.filterPhotos.size
-        _state.value = HomeUiState.Matching(
+        Log.i(
+            TAG,
+            "onFilterTapped: starting Filter on $total photo(s) against " +
+                "${current.selectedClusterIds.size} cluster(s)=${current.selectedClusterIds}",
+        )
+        transition("Filter/start", HomeUiState.Matching(
             processed = 0,
             total = total,
             clusters = current.clusters,
             selectedClusterIds = current.selectedClusterIds,
             filterPhotos = current.filterPhotos,
-        )
+        ))
 
         if (mlPipelineProvider == null) {
-            // Tests / Phase-1 mock path
+            Log.i(TAG, "onFilterTapped: pipeline null -> running MOCK matcher")
             runMockMatching(total)
             return
         }
 
         pipelineJob?.cancel()
+        val launchedAt = SystemClock.elapsedRealtime()
         pipelineJob = viewModelScope.launch {
             val useCase = mlPipelineProvider.filterUseCase()
+            Log.i(TAG, "onFilterTapped: collecting filter use-case flow")
             useCase
                 .run(current.filterPhotos, current.selectedClusterIds)
                 .collect { event ->
@@ -290,10 +419,15 @@ class HomeViewModel(
                             else handle(HomeIntent.FilterFinished(event.keepers))
                     }
                 }
+            Log.i(
+                TAG,
+                "onFilterTapped: filter flow completed in ${SystemClock.elapsedRealtime() - launchedAt}ms",
+            )
         }
     }
 
     private fun runMockMatching(total: Int) {
+        Log.i(TAG, "runMockMatching: total=$total")
         pipelineJob?.cancel()
         pipelineJob = viewModelScope.launch {
             (1..total).forEach { i ->
@@ -313,49 +447,66 @@ class HomeViewModel(
 
     private fun finishMatching(keepers: List<Uri>) {
         if (keepers.isEmpty()) {
+            Log.i(TAG, "finishMatching: 0 keepers -> handleNoMatches")
             handleNoMatches()
             return
         }
-        val current = _state.value as? HomeUiState.Matching ?: return
+        val current = _state.value as? HomeUiState.Matching ?: run {
+            Log.w(TAG, "finishMatching: ignored, state is ${describe(_state.value)} (need Matching)")
+            return
+        }
         val sessionId = UUID.randomUUID().toString()
+        Log.i(TAG, "finishMatching: ${keepers.size} keeper(s) sessionId=$sessionId")
         _keepers.update { it + (sessionId to keepers) }
-        _state.value = HomeUiState.Clustered(
+        transition("Filter/finished", HomeUiState.Clustered(
             clusters = current.clusters,
             selectedClusterIds = current.selectedClusterIds,
-        )
-        viewModelScope.launch { _messages.emit(UiMessage.NavigateToKeepers(sessionId)) }
+        ))
+        viewModelScope.launch { emitMessage("navigateToKeepers", UiMessage.NavigateToKeepers(sessionId)) }
     }
 
     private fun handleNoMatches() {
-        val current = _state.value as? HomeUiState.Matching ?: return
-        _state.value = HomeUiState.Clustered(
+        val current = _state.value as? HomeUiState.Matching ?: run {
+            Log.w(TAG, "handleNoMatches: ignored, state is ${describe(_state.value)} (need Matching)")
+            return
+        }
+        Log.w(TAG, "handleNoMatches: filter produced no keepers")
+        transition("Filter/noMatches", HomeUiState.Clustered(
             clusters = current.clusters,
             selectedClusterIds = current.selectedClusterIds,
-        )
-        viewModelScope.launch { _messages.emit(UiMessage.NoMatchesFound) }
+        ))
+        viewModelScope.launch { emitMessage("noMatches", UiMessage.NoMatchesFound) }
     }
 
     private fun onClearFilter() {
-        val current = _state.value as? HomeUiState.FilterReady ?: return
-        _state.value = HomeUiState.Clustered(
+        val current = _state.value as? HomeUiState.FilterReady ?: run {
+            Log.w(TAG, "onClearFilter: ignored, state is ${describe(_state.value)} (need FilterReady)")
+            return
+        }
+        Log.i(TAG, "onClearFilter: discarding ${current.filterPhotos.size} filter photo(s)")
+        transition("Filter/clear", HomeUiState.Clustered(
             clusters = current.clusters,
             selectedClusterIds = current.selectedClusterIds,
-        )
+        ))
     }
 
     private fun onReset() {
+        Log.w(TAG, "onReset: user confirmed Reset; cancelling pipeline + clearing keepers + state")
         pipelineJob?.cancel()
         _keepers.value = emptyMap()
-        _state.value = HomeUiState.Empty
+        transition("Reset", HomeUiState.Empty)
         viewModelScope.launch {
             // Best-effort wipe; if either is null (e.g. unit tests) just skip.
+            Log.i(TAG, "onReset: wiping repository + preferences")
             clusterRepository?.deleteAll()
             preferences?.clearAll()
+            Log.i(TAG, "onReset: done")
         }
     }
 
     private fun onDeleteCluster(id: String) {
-        _state.update { s ->
+        Log.i(TAG, "onDeleteCluster: id=$id")
+        updateState("DeleteCluster") { s ->
             when (s) {
                 is HomeUiState.Clustered -> {
                     val remaining = s.clusters.filterNot { it.id == id }
@@ -375,15 +526,19 @@ class HomeViewModel(
                         )
                     }
                 }
-                else -> s
+                else -> {
+                    Log.w(TAG, "onDeleteCluster: ignored in ${describe(s)}")
+                    s
+                }
             }
         }
         viewModelScope.launch { clusterRepository?.deleteCluster(id) }
     }
 
     private fun onCancelProcessing() {
+        Log.w(TAG, "onCancelProcessing: cancelling pipeline job; state=${describe(_state.value)}")
         pipelineJob?.cancel()
-        _state.update { s ->
+        updateState("CancelProcessing") { s ->
             when (s) {
                 is HomeUiState.Processing -> HomeUiState.Empty
                 is HomeUiState.Matching -> HomeUiState.Clustered(
@@ -396,13 +551,50 @@ class HomeViewModel(
     }
 
     private fun onReturnedFromKeepers() {
-        // No-op: state is preserved as-is. Hook reserved for future analytics.
+        Log.i(TAG, "onReturnedFromKeepers: user popped Keepers route (state preserved)")
     }
 
     private fun Set<String>.toggle(id: String): Set<String> =
         if (contains(id)) this - id else this + id
 
+    /** Compact, copy-pasteable description of an intent for log lines. */
+    private fun describe(intent: HomeIntent): String = when (intent) {
+        HomeIntent.AddPhotosTapped -> "AddPhotosTapped"
+        is HomeIntent.PhotosPicked -> "PhotosPicked(n=${intent.uris.size})"
+        HomeIntent.ClusterifyTapped -> "ClusterifyTapped"
+        is HomeIntent.ToggleClusterChecked -> "ToggleClusterChecked(id=${intent.clusterId})"
+        HomeIntent.CameraTapped -> "CameraTapped"
+        is HomeIntent.FilterPhotosPicked -> "FilterPhotosPicked(n=${intent.uris.size})"
+        HomeIntent.FilterTapped -> "FilterTapped"
+        HomeIntent.ClearFilterTapped -> "ClearFilterTapped"
+        HomeIntent.ResetConfirmed -> "ResetConfirmed"
+        is HomeIntent.DeleteClusterConfirmed -> "DeleteClusterConfirmed(id=${intent.clusterId})"
+        HomeIntent.CancelProcessingTapped -> "CancelProcessingTapped"
+        HomeIntent.ReturnedFromKeepers -> "ReturnedFromKeepers"
+        is HomeIntent.ClusterifyProgress -> "ClusterifyProgress(${intent.processed}/${intent.total})"
+        is HomeIntent.ClusterifyFinished -> "ClusterifyFinished(clusters=${intent.clusters.size})"
+        HomeIntent.ClusterifyNoFaces -> "ClusterifyNoFaces"
+        is HomeIntent.FilterProgress -> "FilterProgress(${intent.processed}/${intent.total})"
+        is HomeIntent.FilterFinished -> "FilterFinished(keepers=${intent.keepers.size})"
+        HomeIntent.FilterNoMatches -> "FilterNoMatches"
+    }
+
+    private fun describe(state: HomeUiState): String = when (state) {
+        HomeUiState.Empty -> "Empty"
+        is HomeUiState.Selecting -> "Selecting(photos=${state.selectedPhotos.size}, fan=${state.recentFan.size})"
+        is HomeUiState.Processing -> "Processing(${state.processed}/${state.total}, dl=${state.downloadFraction})"
+        is HomeUiState.Clustered ->
+            "Clustered(clusters=${state.clusters.size}, selected=${state.selectedClusterIds.size})"
+        is HomeUiState.FilterReady ->
+            "FilterReady(clusters=${state.clusters.size}, selected=${state.selectedClusterIds.size}, " +
+                "filterPhotos=${state.filterPhotos.size})"
+        is HomeUiState.Matching ->
+            "Matching(${state.processed}/${state.total}, clusters=${state.clusters.size}, " +
+                "selected=${state.selectedClusterIds.size})"
+    }
+
     companion object {
+        private const val TAG: String = "FaceMesh.HomeVM"
         const val MAX_FAN: Int = 4
         const val MAX_FILTER_PHOTOS: Int = 15
     }

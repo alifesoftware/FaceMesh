@@ -1,6 +1,7 @@
 package com.alifesoftware.facemesh.data
 
 import android.content.Context
+import android.util.Log
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
@@ -11,7 +12,9 @@ import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onEach
 
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "facemesh_prefs")
 
@@ -23,39 +26,84 @@ private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(na
  */
 class AppPreferences(private val context: Context) {
 
-    val dbscanEps: Flow<Float> = context.dataStore.data.map { it[KEY_DBSCAN_EPS] ?: DEFAULT_DBSCAN_EPS }
-    val dbscanMinPts: Flow<Int> = context.dataStore.data.map { it[KEY_DBSCAN_MIN_PTS] ?: DEFAULT_DBSCAN_MIN_PTS }
-    val matchThreshold: Flow<Float> = context.dataStore.data.map { it[KEY_MATCH_THRESHOLD] ?: DEFAULT_MATCH_THRESHOLD }
-    val modelsVersion: Flow<Int> = context.dataStore.data.map { it[KEY_MODELS_VERSION] ?: 0 }
-    val lastModelsCheck: Flow<Long> = context.dataStore.data.map { it[KEY_LAST_MODELS_CHECK] ?: 0L }
-    val pendingFilterSession: Flow<String?> = context.dataStore.data.map { it[KEY_PENDING_FILTER_SESSION] }
-    val gpuFallbackToastShown: Flow<Boolean> = context.dataStore.data.map { it[KEY_GPU_FALLBACK_TOAST_SHOWN] ?: false }
+    val dbscanEps: Flow<Float> = context.dataStore.data
+        .map { it[KEY_DBSCAN_EPS] ?: DEFAULT_DBSCAN_EPS }
+        .observed("dbscanEps")
+    val dbscanMinPts: Flow<Int> = context.dataStore.data
+        .map { it[KEY_DBSCAN_MIN_PTS] ?: DEFAULT_DBSCAN_MIN_PTS }
+        .observed("dbscanMinPts")
+    val matchThreshold: Flow<Float> = context.dataStore.data
+        .map { it[KEY_MATCH_THRESHOLD] ?: DEFAULT_MATCH_THRESHOLD }
+        .observed("matchThreshold")
+    val modelsVersion: Flow<Int> = context.dataStore.data
+        .map { it[KEY_MODELS_VERSION] ?: 0 }
+        .observed("modelsVersion")
+    val lastModelsCheck: Flow<Long> = context.dataStore.data
+        .map { it[KEY_LAST_MODELS_CHECK] ?: 0L }
+        .observed("lastModelsCheck")
+    val pendingFilterSession: Flow<String?> = context.dataStore.data
+        .map { it[KEY_PENDING_FILTER_SESSION] }
+        .observed("pendingFilterSession")
+    val gpuFallbackToastShown: Flow<Boolean> = context.dataStore.data
+        .map { it[KEY_GPU_FALLBACK_TOAST_SHOWN] ?: false }
+        .observed("gpuFallbackToastShown")
 
     /**
      * When true (and the device is Android 12+), the Compose theme overrides the All Black
      * brand palette with a Material You dynamic-color scheme derived from the user's wallpaper.
      * Default is false so that first-launch UX is the deliberate brand palette.
      */
-    val dynamicColorEnabled: Flow<Boolean> = context.dataStore.data.map { it[KEY_DYNAMIC_COLOR_ENABLED] ?: false }
+    val dynamicColorEnabled: Flow<Boolean> = context.dataStore.data
+        .map { it[KEY_DYNAMIC_COLOR_ENABLED] ?: false }
+        .observed("dynamicColorEnabled")
 
-    suspend fun setDbscanEps(value: Float) = context.dataStore.edit { it[KEY_DBSCAN_EPS] = value }
-    suspend fun setDbscanMinPts(value: Int) = context.dataStore.edit { it[KEY_DBSCAN_MIN_PTS] = value }
-    suspend fun setMatchThreshold(value: Float) = context.dataStore.edit { it[KEY_MATCH_THRESHOLD] = value }
-    suspend fun setModelsVersion(value: Int) = context.dataStore.edit { it[KEY_MODELS_VERSION] = value }
-    suspend fun setLastModelsCheck(value: Long) = context.dataStore.edit { it[KEY_LAST_MODELS_CHECK] = value }
-    suspend fun setPendingFilterSession(value: String?) = context.dataStore.edit {
-        if (value == null) it.remove(KEY_PENDING_FILTER_SESSION) else it[KEY_PENDING_FILTER_SESSION] = value
+    suspend fun setDbscanEps(value: Float) {
+        Log.i(TAG, "set dbscanEps=$value")
+        context.dataStore.edit { it[KEY_DBSCAN_EPS] = value }
     }
-    suspend fun setGpuFallbackToastShown(value: Boolean) = context.dataStore.edit {
-        it[KEY_GPU_FALLBACK_TOAST_SHOWN] = value
+    suspend fun setDbscanMinPts(value: Int) {
+        Log.i(TAG, "set dbscanMinPts=$value")
+        context.dataStore.edit { it[KEY_DBSCAN_MIN_PTS] = value }
     }
-    suspend fun setDynamicColorEnabled(value: Boolean) = context.dataStore.edit {
-        it[KEY_DYNAMIC_COLOR_ENABLED] = value
+    suspend fun setMatchThreshold(value: Float) {
+        Log.i(TAG, "set matchThreshold=$value")
+        context.dataStore.edit { it[KEY_MATCH_THRESHOLD] = value }
+    }
+    suspend fun setModelsVersion(value: Int) {
+        Log.i(TAG, "set modelsVersion=$value")
+        context.dataStore.edit { it[KEY_MODELS_VERSION] = value }
+    }
+    suspend fun setLastModelsCheck(value: Long) {
+        Log.i(TAG, "set lastModelsCheck=$value")
+        context.dataStore.edit { it[KEY_LAST_MODELS_CHECK] = value }
+    }
+    suspend fun setPendingFilterSession(value: String?) {
+        Log.i(TAG, "set pendingFilterSession=$value")
+        context.dataStore.edit {
+            if (value == null) it.remove(KEY_PENDING_FILTER_SESSION) else it[KEY_PENDING_FILTER_SESSION] = value
+        }
+    }
+    suspend fun setGpuFallbackToastShown(value: Boolean) {
+        Log.i(TAG, "set gpuFallbackToastShown=$value")
+        context.dataStore.edit { it[KEY_GPU_FALLBACK_TOAST_SHOWN] = value }
+    }
+    suspend fun setDynamicColorEnabled(value: Boolean) {
+        Log.i(TAG, "set dynamicColorEnabled=$value")
+        context.dataStore.edit { it[KEY_DYNAMIC_COLOR_ENABLED] = value }
     }
 
-    suspend fun clearAll() = context.dataStore.edit { it.clear() }
+    suspend fun clearAll() {
+        Log.w(TAG, "clearAll: wiping ALL preferences (Reset flow)")
+        context.dataStore.edit { it.clear() }
+    }
+
+    private fun <T> Flow<T>.observed(name: String): Flow<T> = distinctUntilChanged().onEach {
+        Log.i(TAG, "observe $name=$it")
+    }
 
     companion object {
+        private const val TAG: String = "FaceMesh.Prefs"
+
         const val DEFAULT_DBSCAN_EPS: Float = 0.35f
         const val DEFAULT_DBSCAN_MIN_PTS: Int = 2
 

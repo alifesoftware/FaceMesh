@@ -22,7 +22,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
+import android.util.Log
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -37,11 +39,17 @@ import com.alifesoftware.facemesh.R
 import com.alifesoftware.facemesh.mock.MockData
 import com.alifesoftware.facemesh.ui.theme.FaceMeshTheme
 
+private const val SCREEN_TAG: String = "FaceMesh.KeeperScreen"
+
 @Composable
 fun KeeperGalleryScreen(
     keepers: List<Uri>,
     onBack: () -> Unit,
 ) {
+    DisposableEffect(keepers) {
+        Log.i(SCREEN_TAG, "compose: entered with ${keepers.size} keeper(s); first=${keepers.firstOrNull()}")
+        onDispose { Log.i(SCREEN_TAG, "compose: disposed") }
+    }
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(

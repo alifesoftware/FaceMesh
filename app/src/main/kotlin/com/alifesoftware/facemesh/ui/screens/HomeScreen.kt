@@ -57,6 +57,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import android.util.Log
+import androidx.compose.runtime.DisposableEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.alifesoftware.facemesh.R
@@ -91,7 +93,9 @@ fun HomeScreen(
     val snackbarHost = remember { SnackbarHostState() }
 
     LaunchedEffect(viewModel) {
+        Log.i(SCREEN_TAG, "messages: collecting UiMessage flow")
         viewModel.messages.collectLatest { msg ->
+            Log.i(SCREEN_TAG, "messages: received $msg")
             when (msg) {
                 UiMessage.NoFacesFound ->
                     snackbarHost.showSnackbar(ctx.getString(R.string.toast_no_faces_found), duration = SnackbarDuration.Short)
@@ -103,37 +107,82 @@ fun HomeScreen(
                     snackbarHost.showSnackbar(ctx.getString(R.string.toast_max_filter_images), duration = SnackbarDuration.Short)
                 UiMessage.ModelDownloadFailed ->
                     snackbarHost.showSnackbar(ctx.getString(R.string.toast_model_download_failed), duration = SnackbarDuration.Long)
-                is UiMessage.NavigateToKeepers -> onNavigateToKeepers(msg.sessionId)
+                is UiMessage.NavigateToKeepers -> {
+                    Log.i(SCREEN_TAG, "messages: forwarding navigate to Keepers sessionId=${msg.sessionId}")
+                    onNavigateToKeepers(msg.sessionId)
+                }
             }
         }
     }
 
+    DisposableEffect(Unit) {
+        Log.i(SCREEN_TAG, "compose: HomeScreen entered")
+        onDispose { Log.i(SCREEN_TAG, "compose: HomeScreen disposed") }
+    }
+
     var showResetDialog by remember { mutableStateOf(false) }
     if (showResetDialog) {
+        Log.i(SCREEN_TAG, "dialog: Reset confirmation visible")
         ResetConfirmationDialog(
             onConfirm = {
+                Log.i(SCREEN_TAG, "dialog: Reset confirmed")
                 showResetDialog = false
                 viewModel.handle(HomeIntent.ResetConfirmed)
             },
-            onDismiss = { showResetDialog = false },
+            onDismiss = {
+                Log.i(SCREEN_TAG, "dialog: Reset dismissed")
+                showResetDialog = false
+            },
         )
     }
 
     HomeScaffold(
         state = state,
         snackbarHost = snackbarHost,
-        onAddPhotos = onAddPhotosRequested,
-        onPickFilterPhotos = onPickFilterPhotosRequested,
-        onClusterify = { viewModel.handle(HomeIntent.ClusterifyTapped) },
-        onFilter = { viewModel.handle(HomeIntent.FilterTapped) },
-        onClear = { viewModel.handle(HomeIntent.ClearFilterTapped) },
-        onReset = { showResetDialog = true },
-        onSettings = onNavigateToSettings,
-        onToggleCluster = { viewModel.handle(HomeIntent.ToggleClusterChecked(it)) },
-        onSwipeDeleteCluster = { viewModel.handle(HomeIntent.DeleteClusterConfirmed(it)) },
-        onCancelProcessing = { viewModel.handle(HomeIntent.CancelProcessingTapped) },
+        onAddPhotos = {
+            Log.i(SCREEN_TAG, "tap: AddPhotos")
+            onAddPhotosRequested()
+        },
+        onPickFilterPhotos = {
+            Log.i(SCREEN_TAG, "tap: PickFilterPhotos")
+            onPickFilterPhotosRequested()
+        },
+        onClusterify = {
+            Log.i(SCREEN_TAG, "tap: Clusterify")
+            viewModel.handle(HomeIntent.ClusterifyTapped)
+        },
+        onFilter = {
+            Log.i(SCREEN_TAG, "tap: Filter")
+            viewModel.handle(HomeIntent.FilterTapped)
+        },
+        onClear = {
+            Log.i(SCREEN_TAG, "tap: Clear")
+            viewModel.handle(HomeIntent.ClearFilterTapped)
+        },
+        onReset = {
+            Log.i(SCREEN_TAG, "tap: Reset (showing confirmation dialog)")
+            showResetDialog = true
+        },
+        onSettings = {
+            Log.i(SCREEN_TAG, "tap: Settings")
+            onNavigateToSettings()
+        },
+        onToggleCluster = {
+            Log.i(SCREEN_TAG, "tap: ToggleCluster id=$it")
+            viewModel.handle(HomeIntent.ToggleClusterChecked(it))
+        },
+        onSwipeDeleteCluster = {
+            Log.i(SCREEN_TAG, "swipe: DeleteCluster id=$it")
+            viewModel.handle(HomeIntent.DeleteClusterConfirmed(it))
+        },
+        onCancelProcessing = {
+            Log.i(SCREEN_TAG, "tap: CancelProcessing")
+            viewModel.handle(HomeIntent.CancelProcessingTapped)
+        },
     )
 }
+
+private const val SCREEN_TAG: String = "FaceMesh.HomeScreen"
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable

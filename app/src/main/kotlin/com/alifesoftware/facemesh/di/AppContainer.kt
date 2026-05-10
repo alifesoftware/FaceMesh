@@ -1,6 +1,8 @@
 package com.alifesoftware.facemesh.di
 
 import android.content.Context
+import android.os.SystemClock
+import android.util.Log
 import com.alifesoftware.facemesh.BuildConfig
 import com.alifesoftware.facemesh.data.AppDatabase
 import com.alifesoftware.facemesh.data.AppPreferences
@@ -22,12 +24,28 @@ class AppContainer(applicationContext: Context) {
 
     val appCtx: Context = applicationContext.applicationContext
 
-    val database: AppDatabase by lazy { AppDatabase.build(appCtx) }
-    val preferences: AppPreferences by lazy { AppPreferences(appCtx) }
-    val clusterRepository: ClusterRepository by lazy { ClusterRepository(database.clusterDao()) }
+    val database: AppDatabase by lazy {
+        val started = SystemClock.elapsedRealtime()
+        Log.i(TAG, "lazy: building AppDatabase '${AppDatabase.NAME}' (Room)")
+        AppDatabase.build(appCtx).also {
+            Log.i(TAG, "lazy: AppDatabase ready in ${SystemClock.elapsedRealtime() - started}ms")
+        }
+    }
+    val preferences: AppPreferences by lazy {
+        Log.i(TAG, "lazy: constructing AppPreferences (DataStore 'facemesh_prefs')")
+        AppPreferences(appCtx)
+    }
+    val clusterRepository: ClusterRepository by lazy {
+        Log.i(TAG, "lazy: constructing ClusterRepository (will trigger AppDatabase build if not yet built)")
+        ClusterRepository(database.clusterDao())
+    }
 
-    val modelStore: ModelStore by lazy { ModelStore(appCtx) }
+    val modelStore: ModelStore by lazy {
+        Log.i(TAG, "lazy: constructing ModelStore at filesDir/models")
+        ModelStore(appCtx)
+    }
     val modelDownloadManager: ModelDownloadManager by lazy {
+        Log.i(TAG, "lazy: constructing ModelDownloadManager baseUrl=${BuildConfig.MODEL_BASE_URL}")
         ModelDownloadManager(
             store = modelStore,
             preferences = preferences,
@@ -36,11 +54,23 @@ class AppContainer(applicationContext: Context) {
     }
 
     val mlPipelineProvider: MlPipelineProvider by lazy {
+        Log.i(TAG, "lazy: constructing MlPipelineProvider (TFLite graph deferred to first ensureProcessor)")
         MlPipelineProvider(
             context = appCtx,
             store = modelStore,
             clusterRepository = clusterRepository,
             preferences = preferences,
         )
+    }
+
+    init {
+        Log.i(
+            TAG,
+            "init: AppContainer wiring complete (all components LAZY) baseUrl=${BuildConfig.MODEL_BASE_URL}",
+        )
+    }
+
+    companion object {
+        private const val TAG: String = "FaceMesh.DI"
     }
 }

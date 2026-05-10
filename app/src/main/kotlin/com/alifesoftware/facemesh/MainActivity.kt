@@ -2,6 +2,7 @@ package com.alifesoftware.facemesh
 
 import android.net.Uri
 import android.os.Bundle
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
@@ -42,22 +43,32 @@ class MainActivity : ComponentActivity() {
     private val pickPhotosForCluster = registerForActivityResult(
         ActivityResultContracts.PickMultipleVisualMedia(maxItems = MAX_CLUSTER_BATCH),
     ) { uris: List<Uri> ->
+        Log.i(TAG, "pickPhotosForCluster: result n=${uris.size} (max=$MAX_CLUSTER_BATCH)")
         if (uris.isNotEmpty()) {
             persistUriPermissions(uris)
             homeVm.handle(HomeIntent.PhotosPicked(uris))
+        } else {
+            Log.i(TAG, "pickPhotosForCluster: user cancelled")
         }
     }
 
     private val pickPhotosForFilter = registerForActivityResult(
         ActivityResultContracts.PickMultipleVisualMedia(maxItems = HomeViewModel.MAX_FILTER_PHOTOS),
     ) { uris: List<Uri> ->
+        Log.i(
+            TAG,
+            "pickPhotosForFilter: result n=${uris.size} (max=${HomeViewModel.MAX_FILTER_PHOTOS})",
+        )
         if (uris.isNotEmpty()) {
             persistUriPermissions(uris)
             homeVm.handle(HomeIntent.FilterPhotosPicked(uris))
+        } else {
+            Log.i(TAG, "pickPhotosForFilter: user cancelled")
         }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        Log.i(TAG, "onCreate: savedInstanceState=${savedInstanceState != null}")
         // Force light system-bar icons against the always-dark "All Black" theme. Using
         // SystemBarStyle.dark() instead of .auto() decouples the system bars from the device
         // day/night setting (the app itself is always dark; see ui.theme.Theme).
@@ -87,13 +98,40 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onStart() {
+        Log.i(TAG, "onStart")
+        super.onStart()
+    }
+
+    override fun onResume() {
+        Log.i(TAG, "onResume")
+        super.onResume()
+    }
+
+    override fun onPause() {
+        Log.i(TAG, "onPause")
+        super.onPause()
+    }
+
+    override fun onStop() {
+        Log.i(TAG, "onStop")
+        super.onStop()
+    }
+
+    override fun onDestroy() {
+        Log.i(TAG, "onDestroy isFinishing=$isFinishing isChangingConfigurations=$isChangingConfigurations")
+        super.onDestroy()
+    }
+
     private fun launchClusterPicker() {
+        Log.i(TAG, "launchClusterPicker: opening system photo picker (max=$MAX_CLUSTER_BATCH)")
         pickPhotosForCluster.launch(
             PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
         )
     }
 
     private fun launchFilterPicker() {
+        Log.i(TAG, "launchFilterPicker: opening system photo picker (max=${HomeViewModel.MAX_FILTER_PHOTOS})")
         pickPhotosForFilter.launch(
             PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
         )
@@ -107,18 +145,26 @@ class MainActivity : ComponentActivity() {
      */
     private fun persistUriPermissions(uris: List<Uri>) {
         lifecycleScope.launch {
+            var ok = 0
+            var failed = 0
             uris.forEach { uri ->
                 runCatching {
                     contentResolver.takePersistableUriPermission(
                         uri,
                         android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION,
                     )
+                }.onSuccess { ok++ }.onFailure {
+                    failed++
+                    // Most non-OPEN_DOCUMENT URIs throw SecurityException here; that's expected.
+                    Log.i(TAG, "persistUriPermissions: not persistable uri=$uri (${it.javaClass.simpleName})")
                 }
             }
+            Log.i(TAG, "persistUriPermissions: total=${uris.size} persisted=$ok skipped=$failed")
         }
     }
 
     companion object {
+        private const val TAG: String = "FaceMesh.MainActivity"
         // Reasonable cap so the picker doesn't accept a thousand images. Spec is silent on this.
         const val MAX_CLUSTER_BATCH: Int = 100
     }

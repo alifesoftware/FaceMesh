@@ -1,9 +1,12 @@
 package com.alifesoftware.facemesh.data
 
 import android.net.Uri
+import android.os.SystemClock
+import android.util.Log
 import com.alifesoftware.facemesh.domain.model.Cluster
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onEach
 
 /**
  * Repository surface for clusters. Translates between the DB-layer [ClusterEntity] and the
@@ -11,17 +14,41 @@ import kotlinx.coroutines.flow.map
  */
 class ClusterRepository(private val dao: ClusterDao) {
 
-    fun observeClusters(): Flow<List<Cluster>> = dao.observeClusters().map { list ->
-        list.map { it.toDomain() }
+    fun observeClusters(): Flow<List<Cluster>> = dao.observeClusters()
+        .onEach { Log.i(TAG, "observeClusters: emit n=${it.size} ids=${it.map { c -> c.id }}") }
+        .map { list -> list.map { it.toDomain() } }
+
+    suspend fun loadClusters(): List<Cluster> {
+        val started = SystemClock.elapsedRealtime()
+        val rows = dao.getAllClusters()
+        val mapped = rows.map { it.toDomain() }
+        Log.i(
+            TAG,
+            "loadClusters: read ${rows.size} row(s) in ${SystemClock.elapsedRealtime() - started}ms " +
+                "ids=${rows.map { it.id }}",
+        )
+        return mapped
     }
 
-    suspend fun loadClusters(): List<Cluster> = dao.getAllClusters().map { it.toDomain() }
-
     suspend fun loadCentroidsForIds(ids: Set<String>): List<Pair<String, FloatArray>> {
-        if (ids.isEmpty()) return emptyList()
-        return dao.getAllClusters()
-            .filter { it.id in ids }
-            .map { it.id to it.centroid }
+        if (ids.isEmpty()) {
+            Log.i(TAG, "loadCentroidsForIds: empty id set -> early return empty")
+            return emptyList()
+        }
+        val started = SystemClock.elapsedRealtime()
+        val all = dao.getAllClusters()
+        val matched = all.filter { it.id in ids }.map { it.id to it.centroid }
+        Log.i(
+            TAG,
+            "loadCentroidsForIds: requested=${ids.size} totalInDb=${all.size} " +
+                "matched=${matched.size} took=${SystemClock.elapsedRealtime() - started}ms " +
+                "centroidDim=${matched.firstOrNull()?.second?.size ?: 0}",
+        )
+        if (matched.size < ids.size) {
+            val missing = ids - matched.map { it.first }.toSet()
+            Log.w(TAG, "loadCentroidsForIds: ${missing.size} requested id(s) NOT in DB: $missing")
+        }
+        return matched
     }
 
     suspend fun saveCluster(
@@ -30,6 +57,13 @@ class ClusterRepository(private val dao: ClusterDao) {
         contributingFaces: List<ClusterImageEntity>,
         createdAt: Long,
     ) {
+        val started = SystemClock.elapsedRealtime()
+        Log.i(
+            TAG,
+            "saveCluster: id=${cluster.id} faceCount=${cluster.faceCount} " +
+                "centroidDim=${centroid.size} contributingFaces=${contributingFaces.size} " +
+                "thumbUri=${cluster.representativeImageUri} createdAt=$createdAt",
+        )
         dao.saveClusterWithImages(
             cluster = ClusterEntity(
                 id = cluster.id,
@@ -41,11 +75,22 @@ class ClusterRepository(private val dao: ClusterDao) {
             ),
             images = contributingFaces,
         )
+        Log.i(TAG, "saveCluster: id=${cluster.id} persisted in ${SystemClock.elapsedRealtime() - started}ms")
     }
 
-    suspend fun deleteCluster(id: String) = dao.deleteCluster(id)
+    suspend fun deleteCluster(id: String) {
+        val started = SystemClock.elapsedRealtime()
+        Log.i(TAG, "deleteCluster: id=$id")
+        dao.deleteCluster(id)
+        Log.i(TAG, "deleteCluster: id=$id done in ${SystemClock.elapsedRealtime() - started}ms")
+    }
 
-    suspend fun deleteAll() = dao.deleteAllClusters()
+    suspend fun deleteAll() {
+        val started = SystemClock.elapsedRealtime()
+        Log.w(TAG, "deleteAll: wiping ALL clusters (Reset flow)")
+        dao.deleteAllClusters()
+        Log.i(TAG, "deleteAll: completed in ${SystemClock.elapsedRealtime() - started}ms")
+    }
 
     private fun ClusterEntity.toDomain(): Cluster = Cluster(
         id = id,
@@ -53,4 +98,8 @@ class ClusterRepository(private val dao: ClusterDao) {
         faceCount = faceCount,
         name = name,
     )
+
+    companion object {
+        private const val TAG: String = "FaceMesh.Repo"
+    }
 }

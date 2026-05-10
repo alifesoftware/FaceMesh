@@ -1,5 +1,6 @@
 package com.alifesoftware.facemesh.viewmodel
 
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -16,10 +17,19 @@ class SettingsViewModel(
     private val preferences: AppPreferences,
 ) : ViewModel() {
 
+    init {
+        Log.i(TAG, "init: SettingsViewModel created")
+    }
+
     val dynamicColorEnabled: Flow<Boolean> = preferences.dynamicColorEnabled
 
     fun setDynamicColorEnabled(value: Boolean) {
+        Log.i(TAG, "setDynamicColorEnabled: user toggled to $value")
         viewModelScope.launch { preferences.setDynamicColorEnabled(value) }
+    }
+
+    companion object {
+        private const val TAG: String = "FaceMesh.SettingsVM"
     }
 }
 
@@ -29,6 +39,7 @@ class SettingsViewModelFactory(private val container: AppContainer) : ViewModelP
         require(modelClass.isAssignableFrom(SettingsViewModel::class.java)) {
             "SettingsViewModelFactory does not produce ${modelClass.name}"
         }
+        Log.i("FaceMesh.SettingsVM", "factory.create: building SettingsViewModel")
         return SettingsViewModel(preferences = container.preferences) as T
     }
 }
