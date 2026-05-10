@@ -1,0 +1,42 @@
+---
+description: Cursor artefacts (session transcripts, plans, rules) live in git
+alwaysApply: true
+---
+
+# Cursor artefacts are committed, not ignored
+
+This repo treats Cursor's generated artefacts as first-class historical record:
+they document why decisions were made, what rules guide future work, and which
+plans shaped each release. Don't leave them dangling as untracked files.
+
+## Always commit
+
+| Path | What it is |
+|---|---|
+| `.cursor/rules/*.mdc` | Rules that guide AI behaviour in this project |
+| `.cursor/plans/*.plan.md` | Plans the agent produced for multi-step work |
+| `docs/cursor_*.md` | Session transcripts exported from Cursor |
+
+When you finish a session, before suggesting "all done", check `git status`. If
+any of the above appear as untracked or modified, fold them into the relevant
+work commit (or a small follow-up commit) with a clear message referencing
+their origin.
+
+## Commit message conventions
+
+- New transcripts:  `Add session transcript: <short title>`
+- New plans:       `Add plan: <plan name>`
+- Rule changes:    explain *why* in the body, not just *what* (rules outlast
+                   the situations they were written for)
+
+## Don't
+
+- Don't add these paths to `.gitignore`.
+- Don't strip them from `git status` reports to the user just because they're
+  "auto-generated" - they're part of the project's reasoning trail.
+
+## When unsure
+
+If a `docs/cursor_*.md` looks redundant with another committed transcript, ask
+the user before deleting; otherwise commit it. The cost of an extra committed
+markdown file is near zero; the cost of losing a session's reasoning is real.
