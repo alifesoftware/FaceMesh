@@ -29,6 +29,8 @@ Usage:
     python tools/reference_pipeline.py --folder ~/photos/me --folder ~/photos/wife
     python tools/reference_pipeline.py --folder ~/Desktop/test_photos --eps 0.45 --out /tmp/run
 
+    python tools/reference_pipeline.py --folder ./me --folder ./spouse --dedupe-by-content --out ./run
+
 Tuning DBSCAN (optional `--eps`; default matches the app):
 
     Cosine *distance* is d = 1 - cos_similarity between L2-normalised embeddings.
@@ -39,6 +41,14 @@ Tuning DBSCAN (optional `--eps`; default matches the app):
 Optional: pass `--label me` etc. alongside each `--folder` to attach a custom
 ground-truth label; default label is the folder's basename.
 
+When evaluating clustering quality on camera rolls mirrored into two dirs
+(me vs spouse), WhatsApp/Google Photos often duplicates the exact same bytes
+into both trees. Same pixels → identical embeddings → extra ``minPts=2`` blobs
+(pairwise cosine distance 0) that are not extra identities.
+
+Use ``--dedupe-by-content`` to keep the first path encountered for each
+SHA-256 (``--folder`` order decides which copy is canonical).
+
 The script does NOT modify the source photos. With `--out DIR` it writes an
 output bundle: per-cluster subdirectories of *symlinks* to the source photos,
 all aligned 112x112 PNGs, and a `report.json` with the full run metadata
@@ -48,6 +58,7 @@ distances within each cluster, etc.).
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import sys
@@ -147,6 +158,65 @@ def discover_images(folder: Path) -> List[Path]:
     return dedup
 
 
+def sha256_file(path: Path, chunk_size: int = 1024 * 1024) -> str:
+    """Full-file SHA-256 for byte-identical duplicate detection."""
+    resolved = path.resolve()
+    digest = hashlib.sha256()
+    with resolved.open("rb") as fh:
+        while True:
+            block = fh.read(chunk_size)
+            if not block:
+                break
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def flatten_image_jobs(folder_paths: List[Path], folder_labels: List[str]) -> List[Tuple[Path, str]]:
+    """Expand folders to (path, label) pairs: folder walking order × sorted paths."""
+    items: List[Tuple[Path, str]] = []
+    for folder, label in zip(folder_paths, folder_labels):
+        for path in discover_images(folder):
+            items.append((path, label))
+    return items
+
+
+def dedupe_image_jobs_by_content(
+    items: Sequence[Tuple[Path, str]],
+) -> Tuple[List[Tuple[Path, str]], Dict[str, Any]]:
+    """Drop later copies whose file bytes hash the same as an earlier kept path.
+
+    Preserves traversal order from ``items``: the first occurrence of each
+    digest wins (so ``--folder A --folder B`` keeps A's copy when both hold
+    identical ``PXL_….jpg``).
+    Returns (unique_work_items, report_dict for JSON / logs).
+    """
+    seen_digest: Dict[str, Tuple[Path, str]] = {}
+    unique: List[Tuple[Path, str]] = []
+    skipped_rows: List[Dict[str, str]] = []
+    for path, label in items:
+        digest = sha256_file(path)
+        if digest in seen_digest:
+            canon_path, canon_label = seen_digest[digest]
+            skipped_rows.append({
+                "sha256": digest,
+                "skipped_path": str(path.resolve()),
+                "skipped_label": label,
+                "kept_path": str(canon_path.resolve()),
+                "kept_label": canon_label,
+            })
+            continue
+        seen_digest[digest] = (path, label)
+        unique.append((path, label))
+    report: Dict[str, Any] = {
+        "enabled": True,
+        "paths_before": len(items),
+        "paths_after": len(unique),
+        "skipped_count": len(skipped_rows),
+        "skipped": skipped_rows,
+    }
+    return unique, report
+
+
 # ---------------------------------------------------------------------------
 # DBSCAN -- direct port of app/src/.../ml/cluster/Dbscan.kt
 # ---------------------------------------------------------------------------
@@ -236,8 +306,8 @@ def build_embedder(name: str, fp32_path: Path, fp16_path: Path, w8a8_path: Path)
 
 
 def run_pipeline(
-    folder_paths: List[Path],
-    folder_labels: List[str],
+    work_items: Sequence[Tuple[Path, str]],
+    all_folder_labels: Sequence[str],
     detector_path: Path,
     embedder: Embedder,
     detector_variant: str,
@@ -248,71 +318,66 @@ def run_pipeline(
     min_pts: int,
     show_progress: bool = True,
 ) -> Tuple[List[FaceRecord], Dict[str, Any]]:
-    """Walk folders, detect+align+embed every face, return all FaceRecords + stats.
+    """Run detect+align+embed for each (path, folder_label) work item.
 
-    Pure data extraction: no clustering yet (caller does that).
+    ``work_items`` is usually built from ``flatten_image_jobs`` and optionally
+    ``dedupe_image_jobs_by_content``. Pure data extraction: no clustering yet.
     """
     # Build BlazeFace interpreter once.
     interp = re_mod._build_blazeface_interp(detector_path)  # noqa: SLF001
 
     records: List[FaceRecord] = []
     per_folder_stats: Dict[str, Dict[str, int]] = {}
+    for lbl in all_folder_labels:
+        per_folder_stats.setdefault(lbl, {"images": 0, "faces": 0, "zero_face_images": 0})
 
-    total_images = 0
-    for folder, label in zip(folder_paths, folder_labels):
-        per_folder_stats[label] = {"images": 0, "faces": 0, "zero_face_images": 0}
-        images = discover_images(folder)
-        per_folder_stats[label]["images"] = len(images)
-        total_images += len(images)
+    total_images = len(work_items)
+    for path, label in work_items:
+        per_folder_stats[label]["images"] += 1
 
-    print(f"# {sum(s['images'] for s in per_folder_stats.values())} image(s) across "
-          f"{len(folder_paths)} folder(s); detector={detector_variant} "
+    print(f"# {total_images} image(s) in work queue across "
+          f"{len(set(all_folder_labels))} folder label(s); detector={detector_variant} "
           f"alignment={alignment_mode} eps={eps} minPts={min_pts}")
     print()
 
-    # Process images per folder so we know the ground-truth label.
     started_at = time.time()
-    image_counter = 0
-    for folder, label in zip(folder_paths, folder_labels):
-        images = discover_images(folder)
-        for path in images:
-            image_counter += 1
-            t0 = time.time()
-            try:
-                aligned_list, info = detect_and_align_all_faces(
-                    path,
-                    interp,
-                    score_threshold=score_threshold,
-                    alignment_mode=alignment_mode,
-                    detector_variant=detector_variant,
-                )
-            except Exception as exc:  # pylint: disable=broad-except
-                print(f"   ! [{image_counter}/{total_images}] {path.name} ERROR: {exc}")
-                continue
-            n = len(aligned_list)
-            if n == 0:
-                per_folder_stats[label]["zero_face_images"] += 1
-                if show_progress:
-                    print(f"   . [{image_counter}/{total_images}] {label}/{path.name} "
-                          f"-> 0 faces ({(time.time() - t0) * 1000:.0f}ms)")
-                continue
-            for face_idx, (aligned, face_info) in enumerate(zip(aligned_list, info["faces"])):
-                nhwc = to_input(aligned, channel_order)
-                v = embedder.runner(nhwc).reshape(-1).astype(np.float32)
-                assert v.shape == (EMBEDDING_DIM,), v.shape
-                records.append(FaceRecord(
-                    source_path=path,
-                    folder_label=label,
-                    face_index_in_image=face_idx,
-                    bbox=tuple(face_info["bbox"]),
-                    score=float(face_info["score"]),
-                    embedding=v,
-                    embedding_l2=l2(v),
-                ))
-                per_folder_stats[label]["faces"] += 1
+    for image_counter, (path, label) in enumerate(work_items, start=1):
+        t0 = time.time()
+        try:
+            aligned_list, info = detect_and_align_all_faces(
+                path,
+                interp,
+                score_threshold=score_threshold,
+                alignment_mode=alignment_mode,
+                detector_variant=detector_variant,
+            )
+        except Exception as exc:  # pylint: disable=broad-except
+            print(f"   ! [{image_counter}/{total_images}] {path.name} ERROR: {exc}")
+            continue
+        n = len(aligned_list)
+        if n == 0:
+            per_folder_stats[label]["zero_face_images"] += 1
             if show_progress:
-                print(f"   + [{image_counter}/{total_images}] {label}/{path.name} "
-                      f"-> {n} face(s) ({(time.time() - t0) * 1000:.0f}ms)")
+                print(f"   . [{image_counter}/{total_images}] {label}/{path.name} "
+                      f"-> 0 faces ({(time.time() - t0) * 1000:.0f}ms)")
+            continue
+        for face_idx, (aligned, face_info) in enumerate(zip(aligned_list, info["faces"])):
+            nhwc = to_input(aligned, channel_order)
+            v = embedder.runner(nhwc).reshape(-1).astype(np.float32)
+            assert v.shape == (EMBEDDING_DIM,), v.shape
+            records.append(FaceRecord(
+                source_path=path,
+                folder_label=label,
+                face_index_in_image=face_idx,
+                bbox=tuple(face_info["bbox"]),
+                score=float(face_info["score"]),
+                embedding=v,
+                embedding_l2=l2(v),
+            ))
+            per_folder_stats[label]["faces"] += 1
+        if show_progress:
+            print(f"   + [{image_counter}/{total_images}] {label}/{path.name} "
+                  f"-> {n} face(s) ({(time.time() - t0) * 1000:.0f}ms)")
 
     elapsed = time.time() - started_at
     stats = {
@@ -655,6 +720,15 @@ def main(argv: Sequence[str]) -> int:
         action="store_true",
         help="Suppress per-image progress lines.",
     )
+    p.add_argument(
+        "--dedupe-by-content",
+        action="store_true",
+        help="SHA-256 all inputs and skip later copies identical to an earlier file. "
+             "Keeps first path in traversal order (--folder flags first→last, sorted paths "
+             "within each folder). Removes artificial pairwise clusters when the same byte "
+             "exact image lives in multiple trees; skips re-reading bytes on each run besides "
+             "this pre-pass.",
+    )
     args = p.parse_args(argv)
 
     # Resolve labels.
@@ -685,10 +759,30 @@ def main(argv: Sequence[str]) -> int:
     embedder = build_embedder(args.embedder, args.fp32_onnx, args.fp16_tflite, args.w8a8_tflite)
     print(f"   built {embedder.name}")
 
+    work_items = flatten_image_jobs(args.folder, folder_labels)
+    dedupe_report: Optional[Dict[str, Any]] = None
+    if args.dedupe_by_content:
+        t_dup = time.time()
+        work_items, dedupe_report = dedupe_image_jobs_by_content(work_items)
+        dt_dup = time.time() - t_dup
+        print(
+            f"# Dedupe-by-content (SHA-256): {dedupe_report['paths_before']} paths -> "
+            f"{dedupe_report['paths_after']} unique ({dedupe_report['skipped_count']} "
+            f"skipped) in {dt_dup:.2f}s"
+        )
+        if dedupe_report["skipped_count"] and not args.quiet:
+            preview = dedupe_report["skipped"][:5]
+            for row in preview:
+                print(f"      skip [{row['skipped_label']}]{Path(row['skipped_path']).name} "
+                      f"-> keep [{row['kept_label']}]{Path(row['kept_path']).name}")
+            if dedupe_report["skipped_count"] > len(preview):
+                print(f"      ... ({dedupe_report['skipped_count'] - len(preview)} more in report.json)")
+        print()
+
     # Run detection + embedding.
     records, run_stats = run_pipeline(
-        folder_paths=args.folder,
-        folder_labels=folder_labels,
+        work_items,
+        folder_labels,
         detector_path=detector_path,
         embedder=embedder,
         detector_variant=args.detector_variant,
@@ -699,6 +793,8 @@ def main(argv: Sequence[str]) -> int:
         min_pts=args.min_pts,
         show_progress=not args.quiet,
     )
+    if dedupe_report is not None:
+        run_stats["dedupe_by_content"] = dedupe_report
 
     if not records:
         print("# No faces detected; aborting before clustering")
