@@ -29,6 +29,13 @@ Usage:
     python tools/reference_pipeline.py --folder ~/photos/me --folder ~/photos/wife
     python tools/reference_pipeline.py --folder ~/Desktop/test_photos --eps 0.45 --out /tmp/run
 
+Tuning DBSCAN (optional `--eps`; default matches the app):
+
+    Cosine *distance* is d = 1 - cos_similarity between L2-normalised embeddings.
+    Larger ``--eps`` merges more aggressively (fewer clusters / less noise).
+
+    Typical sweep when results feel too fragmented: 0.30, 0.35, 0.40, 0.45, 0.50.
+
 Optional: pass `--label me` etc. alongside each `--folder` to attach a custom
 ground-truth label; default label is the folder's basename.
 
@@ -514,10 +521,38 @@ def write_output_bundle(
 # Main
 # ---------------------------------------------------------------------------
 
+CLUSTERING_TUNING_EPILOG = """
+DBSCAN uses cosine distance d = 1 - cos_similarity between L2-normalised
+embeddings (same as Android). Larger --eps merges neighbours more aggressively.
+
+Suggested values to compare on the SAME inputs (reuse --out dirs or --quiet):
+
+  Strict (more clusters / more noise — split identities easier):
+      --eps 0.28  --eps 0.30  --eps 0.32
+
+  Balanced — default matches PipelineConfig / in-app slider centre:
+      --eps 0.35
+
+  Looser — merge more lighting/pose variants of one person:
+      --eps 0.38  --eps 0.40  --eps 0.42
+
+  Very loose — only when too fragmented at 0.40; risks merging relatives:
+      --eps 0.45  --eps 0.50
+
+  --min-pts tweaks (default %(min)d):
+      --min-pts 2   two faces suffice to seed a cluster (current app default).
+      --min-pts 3   drop tiny accidental pairs; tends to raise noise singletons.
+
+Run the same folders with different --eps; compare stdout cluster counts plus
+noise/ symlink counts under --out, and skim aligned/*.png inside each cluster.
+""".strip() % {"min": DBSCAN_DEFAULT_MIN_PTS}
+
+
 def main(argv: Sequence[str]) -> int:
     p = argparse.ArgumentParser(
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=CLUSTERING_TUNING_EPILOG,
     )
     p.add_argument(
         "--folder",
@@ -592,13 +627,22 @@ def main(argv: Sequence[str]) -> int:
         "--eps",
         type=float,
         default=DBSCAN_DEFAULT_EPS,
-        help=f"DBSCAN eps (cosine distance). Default {DBSCAN_DEFAULT_EPS} matches PipelineConfig.",
+        metavar="D",
+        help=(
+            "DBSCAN neighbourhood radius as cosine DISTANCE (= 1 - cosine similarity "
+            "for unit vectors). Default %(default)g matches PipelineConfig.Clustering "
+            "and the in-app slider default; see epilog below for values to sweep."
+        ),
     )
     p.add_argument(
         "--min-pts",
         type=int,
         default=DBSCAN_DEFAULT_MIN_PTS,
-        help=f"DBSCAN minPts. Default {DBSCAN_DEFAULT_MIN_PTS} matches PipelineConfig.",
+        metavar="N",
+        help=(
+            "DBSCAN minPts (minimum neighbours to seed/expand a cluster). "
+            "Default %(default)s matches PipelineConfig; try 3 if tiny spurious pairs appear."
+        ),
     )
     p.add_argument(
         "--out",
