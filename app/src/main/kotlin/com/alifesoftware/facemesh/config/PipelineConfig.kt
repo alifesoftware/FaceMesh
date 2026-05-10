@@ -346,11 +346,16 @@ object PipelineConfig {
          * mouthCenterX, mouthCenterY]`.
          *
          * Derived from the ArcFace authors' 5-point reference template at 112 x 112 by
-         * averaging the original two mouth-corner points into a single mouth-centre point
-         * (Android's `Matrix.setPolyToPoly` caps at 4 source/destination points).
+         * averaging the original two mouth-corner points into a single mouth-centre point.
          *
          *   - Class:    MODEL CONTRACT (locked to GhostFaceNet training distribution)
-         *   - Used by:  `FaceAligner.align`
+         *   - Used by:  `FaceAligner.align` as the destination of a 4-DOF similarity fit
+         *               (uniform scale + rotation + translation, solved by least squares).
+         *               This is the canonical InsightFace alignment recipe; the previous
+         *               implementation used Android's `Matrix.setPolyToPoly(src, dst, 4)`
+         *               which gives an 8-DOF perspective fit and produced visibly distorted
+         *               aligned crops on real-world faces. Verified end-to-end against
+         *               `tools/reference_embed.py --alignment-mode similarity`.
          *
          * Source: https://insightface.ai/arcface
          *   right_eye    = (38.2946, 51.6963)
