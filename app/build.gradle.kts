@@ -19,14 +19,16 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables { useSupportLibrary = true }
 
-        // SPEC OQ-1 resolved: models hosted as a GitHub Release in the alifesoftware/ModelZoo
-        // repo. Trailing slash is required \u2014 ModelDownloadManager concatenates relative names.
+        // SPEC OQ-1 resolved: models hosted as a GitHub Release. v1 lived in
+        // alifesoftware/ModelZoo; v2 moved into the app's own repo (alifesoftware/FaceMesh)
+        // so the bundle and the consuming code stay version-locked together. Trailing
+        // slash required -- ModelDownloadManager concatenates relative names.
         // facemesh-v2 adds the BlazeFace full-range detector alongside the short-range one;
         // see ModelManifest schema notes.
         buildConfigField(
             "String",
             "MODEL_BASE_URL",
-            "\"https://github.com/alifesoftware/ModelZoo/releases/download/facemesh-v2/\"",
+            "\"https://github.com/alifesoftware/FaceMesh/releases/download/facemesh-v2/\"",
         )
     }
 
