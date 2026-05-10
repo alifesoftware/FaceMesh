@@ -1,6 +1,8 @@
 package com.alifesoftware.facemesh.ml
 
 import android.content.Context
+import android.os.SystemClock
+import android.util.Log
 import com.alifesoftware.facemesh.data.AppPreferences
 import com.alifesoftware.facemesh.data.ClusterRepository
 import com.alifesoftware.facemesh.domain.ClusterifyUseCase
@@ -57,6 +59,8 @@ class MlPipelineProvider(
     private suspend fun ensureProcessor(): FaceProcessor {
         mutex.withLock {
             if (detector == null || embedder == null || aligner == null) {
+                val started = SystemClock.elapsedRealtime()
+                Log.i(TAG, "ensureProcessor: building ML graph (first call)")
                 val rt = runtime ?: TfLiteRuntime.initialise(context).also { runtime = it }
                 val manifest = store.readManifest()
                     ?: error("Model manifest missing; ensureAvailable() must succeed first")
@@ -64,6 +68,11 @@ class MlPipelineProvider(
                     ?: error("Manifest missing entry of type=${ModelDescriptor.TYPE_DETECTOR}")
                 val emb = manifest.models.firstOrNull { it.type == ModelDescriptor.TYPE_EMBEDDER }
                     ?: error("Manifest missing entry of type=${ModelDescriptor.TYPE_EMBEDDER}")
+                Log.i(
+                    TAG,
+                    "ensureProcessor: manifest v${manifest.version} delegate=${rt.activeDelegate} " +
+                        "detector=${det.name} embedder=${emb.name}",
+                )
                 detector = BlazeFaceDetector(
                     runtime = rt,
                     modelFile = store.fileFor(det),
@@ -75,6 +84,10 @@ class MlPipelineProvider(
                     inputSize = manifest.config.embedderInput[0],
                 )
                 aligner = FaceAligner(outputSize = manifest.config.embedderInput[0])
+                Log.i(
+                    TAG,
+                    "ensureProcessor: graph ready in ${SystemClock.elapsedRealtime() - started}ms",
+                )
             }
         }
         return FaceProcessor(
@@ -87,11 +100,18 @@ class MlPipelineProvider(
 
     /** Used by [com.alifesoftware.facemesh.domain.ResetAppUseCase] when the user wipes everything. */
     fun close() {
+        Log.i(TAG, "close: tearing down ML graph (detector + embedder + aligner)")
         runCatching { detector?.close() }
+            .onFailure { Log.w(TAG, "close: detector.close() threw", it) }
         runCatching { embedder?.close() }
+            .onFailure { Log.w(TAG, "close: embedder.close() threw", it) }
         detector = null
         embedder = null
         aligner = null
         runtime = null
+    }
+
+    companion object {
+        private const val TAG: String = "FaceMesh.Pipeline"
     }
 }

@@ -1,6 +1,8 @@
 package com.alifesoftware.facemesh.domain
 
 import android.net.Uri
+import android.os.SystemClock
+import android.util.Log
 import com.alifesoftware.facemesh.data.AppPreferences
 import com.alifesoftware.facemesh.data.ClusterRepository
 import com.alifesoftware.facemesh.ml.FaceProcessor
@@ -29,35 +31,64 @@ class FilterAgainstClustersUseCase(
     }
 
     fun run(images: List<Uri>, selectedClusterIds: Set<String>): Flow<Event> = flow {
+        Log.i(
+            TAG,
+            "run: invoked images=${images.size} selectedClusters=${selectedClusterIds.size}",
+        )
         if (images.isEmpty() || selectedClusterIds.isEmpty()) {
+            Log.i(TAG, "run: empty input -> emitting Done(0)")
             emit(Event.Done(emptyList()))
             return@flow
         }
 
         val matchThreshold = preferences.matchThreshold.first()
         val centroids = clusterRepository.loadCentroidsForIds(selectedClusterIds).map { it.second }
+        Log.i(
+            TAG,
+            "run: matchThreshold=$matchThreshold loadedCentroids=${centroids.size} " +
+                "(requested=${selectedClusterIds.size})",
+        )
         if (centroids.isEmpty()) {
+            Log.w(TAG, "run: no centroids resolved for selected cluster ids -> emitting Done(0)")
             emit(Event.Done(emptyList()))
             return@flow
         }
 
+        val phaseStart = SystemClock.elapsedRealtime()
         val keepers = ArrayList<Uri>(images.size)
         images.forEachIndexed { index, uri ->
             yield()
             try {
-                val faces = processor.process(uri, keepRepresentativeCrop = false)
+                val faces = processor.process(uri, keepDisplayCrop = false)
+                var bestScore = Float.NEGATIVE_INFINITY
                 val isKeeper = faces.any { face ->
                     centroids.any { centroid ->
-                        EmbeddingMath.dot(face.embedding, centroid) >= matchThreshold
+                        val score = EmbeddingMath.dot(face.embedding, centroid)
+                        if (score > bestScore) bestScore = score
+                        score >= matchThreshold
                     }
                 }
+                Log.i(
+                    TAG,
+                    "run: ${index + 1}/${images.size} uri=$uri faces=${faces.size} " +
+                        "bestScore=${"%.3f".format(bestScore)} threshold=$matchThreshold keep=$isKeeper",
+                )
                 if (isKeeper) keepers += uri
-            } catch (_: Exception) {
-                // Skip this image; the rest of the batch still proceeds.
+            } catch (e: Exception) {
+                Log.w(TAG, "run: processor failed for uri=$uri (${index + 1}/${images.size}); skipping", e)
             }
             emit(Event.Progress(processed = index + 1, total = images.size))
         }
 
+        Log.i(
+            TAG,
+            "run: complete keepers=${keepers.size}/${images.size} took=" +
+                "${SystemClock.elapsedRealtime() - phaseStart}ms",
+        )
         emit(Event.Done(keepers))
     }.flowOn(Dispatchers.Default)
+
+    companion object {
+        private const val TAG: String = "FaceMesh.Filter"
+    }
 }

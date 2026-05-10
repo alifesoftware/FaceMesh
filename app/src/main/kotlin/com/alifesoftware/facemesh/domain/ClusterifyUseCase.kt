@@ -3,6 +3,8 @@ package com.alifesoftware.facemesh.domain
 import android.content.Context
 import android.graphics.Bitmap
 import android.net.Uri
+import android.os.SystemClock
+import android.util.Log
 import com.alifesoftware.facemesh.data.AppPreferences
 import com.alifesoftware.facemesh.data.ClusterImageEntity
 import com.alifesoftware.facemesh.data.ClusterRepository
@@ -39,7 +41,9 @@ class ClusterifyUseCase(
     }
 
     fun run(sources: List<Uri>): Flow<Event> = flow {
+        Log.i(TAG, "run: invoked with ${sources.size} source URI(s)")
         if (sources.isEmpty()) {
+            Log.i(TAG, "run: empty source list -> emitting NoFaces")
             emit(Event.NoFaces)
             return@flow
         }
@@ -47,47 +51,69 @@ class ClusterifyUseCase(
         val eps = preferences.dbscanEps.first()
         val minPts = preferences.dbscanMinPts.first()
         val createdAt = System.currentTimeMillis()
+        Log.i(TAG, "run: config eps=$eps minPts=$minPts createdAt=$createdAt")
+        val phaseStart = SystemClock.elapsedRealtime()
 
         val records = ArrayList<FaceProcessor.FaceRecord>(sources.size * 2)
         sources.forEachIndexed { index, uri ->
             yield()
             try {
-                records.addAll(processor.process(uri, keepRepresentativeCrop = true))
+                val before = records.size
+                records.addAll(processor.process(uri, keepDisplayCrop = true))
+                Log.i(
+                    TAG,
+                    "run: processed ${index + 1}/${sources.size} uri=$uri -> +${records.size - before} face(s) " +
+                        "(running total=${records.size})",
+                )
             } catch (e: Exception) {
-                // Per-image failures are tolerated; the rest of the batch still proceeds.
+                Log.w(TAG, "run: processor failed for uri=$uri (${index + 1}/${sources.size}); skipping", e)
             }
             emit(Event.Progress(processed = index + 1, total = sources.size))
         }
 
+        Log.i(
+            TAG,
+            "run: processing phase done; total faces=${records.size} from ${sources.size} image(s) " +
+                "in ${SystemClock.elapsedRealtime() - phaseStart}ms",
+        )
+
         if (records.isEmpty()) {
+            Log.i(TAG, "run: no faces collected -> emitting NoFaces")
             emit(Event.NoFaces)
             return@flow
         }
 
         val dbscan = Dbscan(eps = eps, minPts = minPts)
+        val clusterStart = SystemClock.elapsedRealtime()
         val labels = dbscan.run(records.map { it.embedding })
+        Log.i(TAG, "run: DBSCAN done in ${SystemClock.elapsedRealtime() - clusterStart}ms")
 
         val grouped = LinkedHashMap<Int, MutableList<FaceProcessor.FaceRecord>>()
         labels.forEachIndexed { idx, label ->
             if (label == Dbscan.NOISE) return@forEachIndexed
             grouped.getOrPut(label) { ArrayList() }.add(records[idx])
         }
+        Log.i(
+            TAG,
+            "run: grouped into ${grouped.size} cluster(s) " +
+                "(noise=${labels.count { it == Dbscan.NOISE }})",
+        )
 
         if (grouped.isEmpty()) {
+            Log.i(TAG, "run: only noise after DBSCAN -> emitting NoFaces")
             emit(Event.NoFaces)
             return@flow
         }
 
         val resultClusters = ArrayList<Cluster>(grouped.size)
-        for ((_, members) in grouped) {
+        for ((label, members) in grouped) {
             val centroid = EmbeddingMath.meanAndNormalize(members.map { it.embedding })
             val rep = pickRepresentative(members)
-            val repBitmap = members.firstOrNull { it.faceIndex == 0 && it.representativeCrop != null }?.representativeCrop
-            val savedThumbUri = if (repBitmap != null) {
-                saveRepresentative(repBitmap)
-            } else {
-                rep.sourceUri
-            }
+            // FaceProcessor produces a natural display crop for every accepted face when
+            // keepDisplayCrop=true, so any cluster member is a viable representative \u2014 not
+            // just members where faceIndex == 0. The fallback to `rep.sourceUri` (the full
+            // source photo) is now reached only on degenerate inputs.
+            val savedThumbUri = rep.displayCrop?.let(::saveRepresentative) ?: rep.sourceUri
             val clusterId = UUID.randomUUID().toString()
             val cluster = Cluster(
                 id = clusterId,
@@ -104,16 +130,33 @@ class ClusterifyUseCase(
             }
             clusterRepository.saveCluster(cluster, centroid, rows, createdAt)
             resultClusters += cluster
+            Log.i(
+                TAG,
+                "run: persisted cluster label=$label id=$clusterId members=${members.size} " +
+                    "thumbFromCrop=${rep.displayCrop != null} thumbUri=$savedThumbUri",
+            )
         }
 
-        // Recycle held representative crops we already persisted.
-        records.forEach { it.representativeCrop?.recycle() }
+        // Recycle held display crops we already persisted.
+        records.forEach { it.displayCrop?.recycle() }
 
+        Log.i(
+            TAG,
+            "run: complete clusters=${resultClusters.size} totalTime=" +
+                "${SystemClock.elapsedRealtime() - phaseStart}ms",
+        )
         emit(Event.Done(resultClusters))
     }.flowOn(Dispatchers.Default)
 
+    /**
+     * Pick the most cluster-representative face. Heuristic for v1: prefer the largest
+     * available natural display crop (largest face = closest to the camera = best chance of a
+     * recognisable thumbnail), falling back to the first member if none have a crop.
+     */
     private fun pickRepresentative(members: List<FaceProcessor.FaceRecord>): FaceProcessor.FaceRecord =
-        members.firstOrNull { it.faceIndex == 0 && it.representativeCrop != null }
+        members
+            .filter { it.displayCrop != null }
+            .maxByOrNull { (it.displayCrop?.width ?: 0) * (it.displayCrop?.height ?: 0) }
             ?: members.first()
 
     /** Persists a representative thumbnail as PNG into private app files; returns its file:// Uri. */
@@ -127,6 +170,7 @@ class ClusterifyUseCase(
     }
 
     companion object {
+        private const val TAG: String = "FaceMesh.Clusterify"
         const val REPRESENTATIVE_DIR: String = "representatives"
     }
 }

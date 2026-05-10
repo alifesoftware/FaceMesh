@@ -2,6 +2,7 @@ package com.alifesoftware.facemesh.ml
 
 import android.graphics.PointF
 import android.graphics.RectF
+import android.util.Log
 import kotlin.math.exp
 import kotlin.math.max
 import kotlin.math.min
@@ -82,7 +83,13 @@ class BlazeFaceDecoder(
             candidates += DetectedFace(rect, landmarks, score)
         }
 
-        return weightedNms(candidates, iouThreshold)
+        val kept = weightedNms(candidates, iouThreshold)
+        Log.i(
+            TAG,
+            "decode: source=${sourceWidth}x${sourceHeight} threshold=$scoreThreshold " +
+                "candidatesAboveThreshold=${candidates.size} keptAfterNms=${kept.size} iou=$iouThreshold",
+        )
+        return kept
     }
 
     private fun readLandmark(
@@ -174,6 +181,7 @@ class BlazeFaceDecoder(
     }
 
     companion object {
+        private const val TAG: String = "FaceMesh.Decoder.Anchor"
         const val REG_STRIDE: Int = 16
         fun sigmoid(x: Float): Float = 1f / (1f + exp((-x).toDouble())).toFloat()
     }

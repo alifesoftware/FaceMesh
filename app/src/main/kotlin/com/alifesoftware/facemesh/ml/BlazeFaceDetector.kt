@@ -4,6 +4,8 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Matrix
 import android.graphics.Paint
+import android.os.SystemClock
+import android.util.Log
 import org.tensorflow.lite.InterpreterApi
 import java.io.Closeable
 import java.io.File
@@ -38,6 +40,11 @@ class BlazeFaceDetector(
             .also { require(it >= 0) { "BlazeFace 'regressors' output not found; got $names" } }
         clsOutputIndex = names.indexOfFirst { it.contains("classificator") || it.contains("classif") }
             .also { require(it >= 0) { "BlazeFace 'classificators' output not found; got $names" } }
+        Log.i(
+            TAG,
+            "init: model=${modelFile.name} (${modelFile.length()}B) inputSize=${inputSize}x${inputSize} " +
+                "outputs=$names regIdx=$regOutputIndex clsIdx=$clsOutputIndex anchors=$NUM_ANCHORS",
+        )
     }
 
     // Reused between calls to avoid GC churn during clustering of 50+ images.
@@ -54,18 +61,34 @@ class BlazeFaceDetector(
      * Caller must NOT recycle [source] until this call returns.
      */
     fun detect(source: Bitmap): List<DetectedFace> {
+        Log.i(TAG, "detect: start source=${source.width}x${source.height} -> input=${inputSize}x${inputSize}")
+        val prepStart = SystemClock.elapsedRealtime()
         prepareInput(source)
+        val prepMs = SystemClock.elapsedRealtime() - prepStart
         outputs.clear()
         outputs[regOutputIndex] = regOutput
         outputs[clsOutputIndex] = clsOutput
+        val inferStart = SystemClock.elapsedRealtime()
         interpreter.runForMultipleInputsOutputs(arrayOf<Any>(inputBuffer), outputs)
+        val inferMs = SystemClock.elapsedRealtime() - inferStart
 
         val regs = FloatArray(NUM_ANCHORS * BlazeFaceDecoder.REG_STRIDE)
         for (i in 0 until NUM_ANCHORS) {
             System.arraycopy(regOutput[0][i], 0, regs, i * BlazeFaceDecoder.REG_STRIDE, BlazeFaceDecoder.REG_STRIDE)
         }
         val cls = FloatArray(NUM_ANCHORS) { clsOutput[0][it][0] }
-        return decoder.decode(regs, cls, source.width, source.height)
+        Log.i(
+            TAG,
+            "detect: inference done prep=${prepMs}ms infer=${inferMs}ms " +
+                "rawLogits[min/max]=${cls.minOrNull() ?: 0f}/${cls.maxOrNull() ?: 0f}",
+        )
+        val faces = decoder.decode(regs, cls, source.width, source.height)
+        Log.i(
+            TAG,
+            "detect: done returning ${faces.size} face(s) " +
+                "topScores=${faces.take(3).map { "%.2f".format(it.score) }}",
+        )
+        return faces
     }
 
     private fun prepareInput(source: Bitmap) {
@@ -103,10 +126,13 @@ class BlazeFaceDetector(
     }
 
     override fun close() {
+        Log.i(TAG, "close: releasing BlazeFace interpreter")
         runCatching { interpreter.close() }
+            .onFailure { Log.w(TAG, "close: interpreter.close() threw", it) }
     }
 
     companion object {
+        private const val TAG: String = "FaceMesh.Detector"
         const val NUM_ANCHORS: Int = 896
     }
 }

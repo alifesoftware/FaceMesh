@@ -4,6 +4,7 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Matrix
 import android.graphics.Paint
+import android.util.Log
 
 /**
  * Affinely aligns a face crop into the canonical 112x112 pose used by GhostFaceNet
@@ -21,6 +22,11 @@ class FaceAligner(
     private val matrix = Matrix()
 
     fun align(source: Bitmap, face: DetectedFace): Bitmap {
+        Log.i(
+            TAG,
+            "align: source=${source.width}x${source.height} -> ${outputSize}x${outputSize} " +
+                "bbox=${face.boundingBox} eyeDist=${face.landmarks.eyeDistance()} score=${"%.3f".format(face.score)}",
+        )
         val src = floatArrayOf(
             face.landmarks.rightEye.x, face.landmarks.rightEye.y,
             face.landmarks.leftEye.x, face.landmarks.leftEye.y,
@@ -34,10 +40,12 @@ class FaceAligner(
         val out = Bitmap.createBitmap(outputSize, outputSize, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(out)
         canvas.drawBitmap(source, matrix, paint)
+        Log.i(TAG, "align: produced ${out.width}x${out.height} aligned crop")
         return out
     }
 
     companion object {
+        private const val TAG: String = "FaceMesh.Aligner"
         const val OUTPUT_SIZE: Int = 112
 
         /**

@@ -86,6 +86,10 @@ android {
 
     testOptions {
         unitTests.isIncludeAndroidResources = true
+        // Pure-JVM tests (no Robolectric) call into pipeline code that logs via android.util.Log.
+        // Returning default values turns those Log.* calls into no-ops instead of throwing
+        // "Method i in android.util.Log not mocked". Robolectric tests still see real logging.
+        unitTests.isReturnDefaultValues = true
     }
 }
 

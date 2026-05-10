@@ -5,6 +5,8 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Matrix
 import android.net.Uri
+import android.os.SystemClock
+import android.util.Log
 import androidx.exifinterface.media.ExifInterface
 import java.io.IOException
 import kotlin.math.max
@@ -19,12 +21,17 @@ import kotlin.math.max
  */
 object BitmapDecoder {
 
+    private const val TAG = "FaceMesh.Decoder"
+
     const val MAX_DIM: Int = 1280
 
     @Throws(IOException::class)
     fun decode(resolver: ContentResolver, uri: Uri, maxDim: Int = MAX_DIM): Bitmap {
+        val started = SystemClock.elapsedRealtime()
+        Log.i(TAG, "decode: start uri=$uri maxDim=$maxDim")
         val (w, h) = readBounds(resolver, uri)
         val sample = computeInSampleSize(w, h, maxDim)
+        Log.i(TAG, "decode: bounds=${w}x${h} sampleSize=$sample (target<=$maxDim)")
         val opts = BitmapFactory.Options().apply {
             inJustDecodeBounds = false
             inSampleSize = sample
@@ -33,8 +40,19 @@ object BitmapDecoder {
         val raw = resolver.openInputStream(uri).use {
             requireNotNull(it) { "Could not open $uri" }
             BitmapFactory.decodeStream(it, null, opts)
-        } ?: throw IOException("Failed to decode $uri")
-        return applyExifRotation(resolver, uri, raw)
+        } ?: run {
+            Log.e(TAG, "decode: BitmapFactory returned null for uri=$uri")
+            throw IOException("Failed to decode $uri")
+        }
+        Log.i(TAG, "decode: rawDecoded=${raw.width}x${raw.height} config=${raw.config}")
+        val rotated = applyExifRotation(resolver, uri, raw)
+        val elapsed = SystemClock.elapsedRealtime() - started
+        Log.i(
+            TAG,
+            "decode: done uri=$uri final=${rotated.width}x${rotated.height} " +
+                "rotatedNew=${rotated !== raw} took=${elapsed}ms",
+        )
+        return rotated
     }
 
     private fun readBounds(resolver: ContentResolver, uri: Uri): Pair<Int, Int> {
@@ -65,7 +83,8 @@ object BitmapDecoder {
                 input?.let { ExifInterface(it).getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL) }
                     ?: ExifInterface.ORIENTATION_NORMAL
             }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            Log.w(TAG, "applyExifRotation: failed to read EXIF for uri=$uri; assuming NORMAL", e)
             ExifInterface.ORIENTATION_NORMAL
         }
 
@@ -76,8 +95,12 @@ object BitmapDecoder {
             ExifInterface.ORIENTATION_ROTATE_270 -> matrix.postRotate(270f)
             ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> matrix.preScale(-1f, 1f)
             ExifInterface.ORIENTATION_FLIP_VERTICAL -> matrix.preScale(1f, -1f)
-            else -> return bitmap
+            else -> {
+                Log.i(TAG, "applyExifRotation: orientation=$orientation, no transform applied")
+                return bitmap
+            }
         }
+        Log.i(TAG, "applyExifRotation: orientation=$orientation, applying transform")
         val rotated = Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
         if (rotated !== bitmap) bitmap.recycle()
         return rotated

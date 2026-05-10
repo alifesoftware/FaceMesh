@@ -1,5 +1,7 @@
 package com.alifesoftware.facemesh.ml.download
 
+import android.os.SystemClock
+import android.util.Log
 import com.alifesoftware.facemesh.data.AppPreferences
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -33,19 +35,35 @@ class ModelDownloadManager(
      * Otherwise emits download progress, then [Progress.Done] (or [Progress.Failed]).
      */
     fun ensureAvailable(): Flow<Progress> = flow {
+        Log.i(TAG, "ensureAvailable: baseUrl=$baseUrl checking on-disk cache")
         val cached = store.readManifest()
         if (cached != null && store.allFilesPresent(cached)) {
+            Log.i(TAG, "ensureAvailable: cached manifest v${cached.version} present, skipping network")
             emit(Progress.AlreadyAvailable(cached))
             return@flow
         }
-
+        Log.i(TAG, "ensureAvailable: cache miss, downloading manifest...")
         val manifest = downloadManifestWithRetry()
-            ?: run { emit(Progress.Failed("manifest")); return@flow }
+            ?: run {
+                Log.e(TAG, "ensureAvailable: manifest download failed after all retries")
+                emit(Progress.Failed("manifest"))
+                return@flow
+            }
+        Log.i(
+            TAG,
+            "ensureAvailable: manifest v${manifest.version} fetched; ${manifest.models.size} model(s) to download",
+        )
 
         emit(Progress.Started(totalBytes = -1))
         val results = mutableListOf<File>()
         for ((index, descriptor) in manifest.models.withIndex()) {
             try {
+                Log.i(
+                    TAG,
+                    "ensureAvailable: downloading model[${index + 1}/${manifest.models.size}] " +
+                        "name=${descriptor.name} url=${descriptor.relativeUrl}",
+                )
+                val started = SystemClock.elapsedRealtime()
                 val file = downloadModelWithRetry(descriptor) { downloaded, total ->
                     emit(Progress.Downloading(
                         index = index,
@@ -54,10 +72,17 @@ class ModelDownloadManager(
                         totalBytes = total,
                     ))
                 }
+                Log.i(
+                    TAG,
+                    "ensureAvailable: model ${descriptor.name} -> ${file.absolutePath} " +
+                        "(${file.length()}B) in ${SystemClock.elapsedRealtime() - started}ms",
+                )
                 results += file
             } catch (cancelled: CancellationException) {
+                Log.w(TAG, "ensureAvailable: cancelled during ${descriptor.name}")
                 throw cancelled
             } catch (e: Exception) {
+                Log.e(TAG, "ensureAvailable: model ${descriptor.name} failed; emitting Failed", e)
                 emit(Progress.Failed(descriptor.name))
                 return@flow
             }
@@ -71,6 +96,11 @@ class ModelDownloadManager(
         preferences.setDbscanEps(manifest.config.dbscanEps)
         preferences.setDbscanMinPts(manifest.config.dbscanMinPts)
         preferences.setMatchThreshold(manifest.config.matchThreshold)
+        Log.i(
+            TAG,
+            "ensureAvailable: complete v=${manifest.version} dbscanEps=${manifest.config.dbscanEps} " +
+                "minPts=${manifest.config.dbscanMinPts} matchTh=${manifest.config.matchThreshold}",
+        )
 
         emit(Progress.Done(manifest))
     }.flowOn(Dispatchers.IO)
@@ -111,9 +141,18 @@ class ModelDownloadManager(
                 throw cancelled
             } catch (t: Throwable) {
                 lastError = t
-                if (attempt < BACKOFF_MS.lastIndex) delay(backoff)
+                if (attempt < BACKOFF_MS.lastIndex) {
+                    Log.w(
+                        TAG,
+                        "withRetry: attempt ${attempt + 1}/${BACKOFF_MS.size} failed; " +
+                            "backing off ${backoff}ms",
+                        t,
+                    )
+                    delay(backoff)
+                }
             }
         }
+        Log.e(TAG, "withRetry: exhausted all ${BACKOFF_MS.size} attempts", lastError)
         return null
     }
 
@@ -173,9 +212,11 @@ class ModelDownloadManager(
         }
         val actual = digest.digest().joinToString("") { "%02x".format(it) }
         if (!actual.equals(expected, ignoreCase = true)) {
+            Log.e(TAG, "verifySha256: mismatch for ${file.name} expected=$expected actual=$actual; deleting tmp")
             file.delete()
             throw IOException("SHA-256 mismatch for ${file.name}: expected $expected, got $actual")
         }
+        Log.i(TAG, "verifySha256: ${file.name} sha256 OK")
     }
 
     /** Re-emit the manifest as JSON, useful when persisting the version we just verified. */
@@ -223,6 +264,7 @@ class ModelDownloadManager(
     }
 
     companion object {
+        private const val TAG: String = "FaceMesh.ModelDl"
         const val MANIFEST_PATH: String = "manifest.json"
         const val CONNECT_TIMEOUT_MS: Int = 15_000
         const val READ_TIMEOUT_MS: Int = 30_000

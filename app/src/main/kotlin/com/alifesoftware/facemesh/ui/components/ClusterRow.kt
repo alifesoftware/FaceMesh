@@ -173,6 +173,7 @@ private fun ClusterAvatar(
         Surface(
             shape = CircleShape,
             tonalElevation = 2.dp,
+            color = MaterialTheme.colorScheme.surfaceVariant,
             modifier = Modifier
                 .size(AvatarSize)
                 .align(Alignment.Center),
@@ -180,7 +181,11 @@ private fun ClusterAvatar(
             AsyncImage(
                 model = cluster.representativeImageUri,
                 contentDescription = null,
-                contentScale = ContentScale.Crop,
+                // Fit (not Crop) keeps the entire saved thumbnail visible inside the circle.
+                // Our display crops are square + padded around the face, so Fit and Crop look
+                // identical for the common path \u2014 but Fit also rescues the rare fallback case
+                // where the saved Uri is the full source photo (non-square, off-centre face).
+                contentScale = ContentScale.Fit,
                 modifier = Modifier
                     .fillMaxSize()
                     .clip(CircleShape),

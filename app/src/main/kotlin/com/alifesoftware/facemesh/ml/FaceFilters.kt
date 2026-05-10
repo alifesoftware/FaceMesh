@@ -1,5 +1,6 @@
 package com.alifesoftware.facemesh.ml
 
+import android.util.Log
 import kotlin.math.abs
 
 /**
@@ -13,6 +14,8 @@ import kotlin.math.abs
  */
 object FaceFilters {
 
+    private const val TAG: String = "FaceMesh.Filters"
+
     fun apply(
         faces: List<DetectedFace>,
         confidenceThreshold: Float = 0.75f,
@@ -20,14 +23,30 @@ object FaceFilters {
         eyeWidthRatioMax: Float = 0.65f,
         sizeBandFraction: Float = 1.0f, // \u00b1 100% \u2192 \u00b1 2sigma typical; tune empirically
     ): List<DetectedFace> {
+        Log.i(
+            TAG,
+            "apply: input=${faces.size} confTh=$confidenceThreshold eyeRatio=[$eyeWidthRatioMin..$eyeWidthRatioMax] " +
+                "sizeBand=$sizeBandFraction",
+        )
         val byScore = faces.filter { it.score >= confidenceThreshold }
+        Log.i(TAG, "apply: afterConfidence=${byScore.size} (dropped ${faces.size - byScore.size})")
         val byGeometry = byScore.filter { it.passesGeometry(eyeWidthRatioMin, eyeWidthRatioMax) }
-        if (byGeometry.size <= 1) return byGeometry
+        Log.i(TAG, "apply: afterGeometry=${byGeometry.size} (dropped ${byScore.size - byGeometry.size})")
+        if (byGeometry.size <= 1) {
+            Log.i(TAG, "apply: skipping size-band filter (n<=1); returning ${byGeometry.size}")
+            return byGeometry
+        }
 
         val widths = byGeometry.map { it.boundingBox.width() }.sorted()
         val median = widths[widths.size / 2]
         val band = median * sizeBandFraction
-        return byGeometry.filter { abs(it.boundingBox.width() - median) <= band }
+        val kept = byGeometry.filter { abs(it.boundingBox.width() - median) <= band }
+        Log.i(
+            TAG,
+            "apply: medianWidth=$median band=±$band afterSizeBand=${kept.size} " +
+                "(dropped ${byGeometry.size - kept.size})",
+        )
+        return kept
     }
 
     private fun DetectedFace.passesGeometry(min: Float, max: Float): Boolean {

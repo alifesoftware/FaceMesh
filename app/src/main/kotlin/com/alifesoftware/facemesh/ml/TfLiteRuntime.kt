@@ -1,6 +1,8 @@
 package com.alifesoftware.facemesh.ml
 
 import android.content.Context
+import android.os.SystemClock
+import android.util.Log
 import com.google.android.gms.tflite.client.TfLiteInitializationOptions
 import com.google.android.gms.tflite.gpu.support.TfLiteGpu
 import com.google.android.gms.tflite.java.TfLite
@@ -33,6 +35,7 @@ class TfLiteRuntime private constructor(
     /** Memory-map a `.tflite` file into a [MappedByteBuffer] required by [InterpreterApi.create]. */
     fun loadModel(file: File): MappedByteBuffer {
         require(file.exists() && file.length() > 0) { "Model file missing or empty: ${file.absolutePath}" }
+        Log.i(TAG, "loadModel: mmap ${file.absolutePath} (${file.length()} bytes)")
         return file.inputStream().channel.use { channel ->
             channel.map(FileChannel.MapMode.READ_ONLY, 0, channel.size())
         }
@@ -53,10 +56,19 @@ class TfLiteRuntime private constructor(
                 setNumThreads(numThreads)
             }
         }
-        return InterpreterApi.create(model, options)
+        val started = SystemClock.elapsedRealtime()
+        val interpreter = InterpreterApi.create(model, options)
+        Log.i(
+            TAG,
+            "newInterpreter: created delegate=$activeDelegate " +
+                "${if (!gpuAvailable) "threads=$numThreads " else ""}in ${SystemClock.elapsedRealtime() - started}ms",
+        )
+        return interpreter
     }
 
     companion object {
+        private const val TAG: String = "FaceMesh.TfLite"
+
         @Volatile private var instance: TfLiteRuntime? = null
 
         /**
@@ -65,18 +77,32 @@ class TfLiteRuntime private constructor(
          * [com.google.android.gms.tasks.Task].
          */
         suspend fun initialise(context: Context): TfLiteRuntime {
-            instance?.let { return it }
+            instance?.let {
+                Log.i(TAG, "initialise: returning cached runtime delegate=${it.activeDelegate}")
+                return it
+            }
+            val started = SystemClock.elapsedRealtime()
+            Log.i(TAG, "initialise: probing GPU delegate availability...")
             val gpuAvailable = checkGpuSupport(context)
+            Log.i(TAG, "initialise: gpuDelegateAvailable=$gpuAvailable")
             val options = TfLiteInitializationOptions.builder()
                 .setEnableGpuDelegateSupport(gpuAvailable)
                 .build()
             Tasks.await(TfLite.initialize(context.applicationContext, options))
-            return TfLiteRuntime(gpuAvailable).also { instance = it }
+            val rt = TfLiteRuntime(gpuAvailable).also { instance = it }
+            Log.i(
+                TAG,
+                "initialise: Play Services TFLite ready delegate=${rt.activeDelegate} " +
+                    "took=${SystemClock.elapsedRealtime() - started}ms",
+            )
+            return rt
         }
 
         /** Best-effort check; if Play Services GPU module isn't available we fall back. */
         private suspend fun checkGpuSupport(context: Context): Boolean = runCatching {
             Tasks.await(TfLiteGpu.isGpuDelegateAvailable(context.applicationContext))
+        }.onFailure {
+            Log.w(TAG, "checkGpuSupport: probe failed, falling back to CPU/XNNPACK", it)
         }.getOrDefault(false)
     }
 }
