@@ -1,0 +1,66 @@
+---
+description: FaceMesh logging conventions — log enough that a single logcat capture replays the entire run end-to-end.
+alwaysApply: true
+---
+
+# FaceMesh Logging Conventions
+
+Goal: a single `adb logcat -s 'FaceMesh.*:V'` capture must let us replay the entire run — process start → DI → user taps → state transitions → model I/O → per-decision branches → DB writes → navigation → teardown. Add logs as you write code, not later.
+
+## Tag scheme
+- Use `private const val TAG: String = "FaceMesh.<Component>"` in a companion object (top-level `private const val` is fine for files-as-objects). Pick a stable, human-readable component name (e.g. `FaceMesh.HomeVM`, `FaceMesh.Detector`, `FaceMesh.Repo`).
+- One tag per class. Don't reuse another component's tag.
+
+## Severity
+- **`Log.i`** — happy-path traces, decisions, calculations, every state transition. This is the default for new code.
+- **`Log.w`** — tolerated failures, silent catches, ignored intents in unexpected states, fallback paths, anything previously hidden.
+- **`Log.e`** — hard failures and recycled-bitmap / null-required guards before throwing/returning.
+- **Never use `Log.d` or `Log.v`** for new code. Don't use bare `println`. Don't introduce a custom logger.
+
+## Always log
+- **Lifecycle**: `onCreate/Start/Resume/Pause/Stop/Destroy`, ViewModel `init`, lazy DI builds, `Closeable.close()`.
+- **Every intent + every state transition**: log `intent=… curState=…` on entry; centralise via `transition(reason, next)` helpers so old → new is logged with a short reason tag (`Clusterify/start`, `Filter/finished`, …). Log no-op transitions and ignored intents (`Log.w`).
+- **Every flow event** you collect: emit a line per `Progress`/`Done`/`Failed`/etc.
+- **Every preference / DB write**: log key + new value, plus row counts and elapsed ms on reads.
+- **Every navigation edge** + route enter/exit pairs.
+- **User taps / dialog visibility** at the screen layer.
+
+## ML / pipeline / calculations
+For any code that does inference, decoding, filtering, alignment, embedding, clustering, math, or image work:
+- Log **inputs** (dims, dtype, ranges) and **outputs** (counts, top scores, distribution stats, first few values).
+- Log **per-decision branches**: `PASS`/`DROP` with the actual reason and the value vs the threshold. Don't summarise — name the face/anchor/point index.
+- Log **early exits** explicitly (empty input, cache hit, already-built guard, recycled bitmap).
+- Log **per-stage timings** with `SystemClock.elapsedRealtime()`.
+- For tensor I/O, log model file name + size at init and tensor shape/dtype/byteCount per input/output.
+
+## Examples
+
+```kotlin
+// Tag + severity
+companion object { private const val TAG = "FaceMesh.Filters" }
+Log.i(TAG, "apply: face[$i] DROP confidence score=${"%.3f".format(f.score)} < $threshold bbox=${f.boundingBox}")
+Log.w(TAG, "apply: ignored in unexpected state ${describe(s)}")
+Log.e(TAG, "detect: source bitmap is RECYCLED; cannot run detection"); return emptyList()
+
+// State transition (don't mutate _state directly)
+private fun transition(reason: String, next: HomeUiState) {
+    Log.i(TAG, "transition[$reason]: ${describe(prev)} -> ${describe(next)}")
+    _state.value = next
+}
+
+// Tolerated failure — never silent
+} catch (e: Exception) {
+    Log.w(TAG, "process failed for uri=$uri; skipping", e)
+}
+```
+
+## Anti-patterns
+- ❌ `try { ... } catch (_: Exception) {}` — always at least `Log.w` with the throwable.
+- ❌ `_state.value = X` without going through a logged helper.
+- ❌ Aggregate-only logs (`"kept N of M"`) without per-item reasons when discards are the interesting part.
+- ❌ Logging in tight inner loops (`O(n²)`) — aggregate stats outside the loop instead.
+
+## Test/build hygiene
+Pure-JVM unit tests (no Robolectric) need `unitTests.isReturnDefaultValues = true` in `app/build.gradle.kts` (already set) so `Log.*` calls return 0 instead of throwing. Don't disable that.
+
+R8's existing `assumenosideeffects` rule strips `Log.i` from release builds, so verbosity is free in production.
