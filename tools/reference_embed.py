@@ -317,6 +317,45 @@ def _run_blazeface(
 # 4-point perspective solve + ArcFace affine warp via PIL
 # ---------------------------------------------------------------------------
 
+def _similarity_2d_lstsq(
+    src: Sequence[Tuple[float, float]],
+    dst: Sequence[Tuple[float, float]],
+) -> np.ndarray:
+    """Least-squares fit of a 2D similarity transform mapping `src` points to `dst` points.
+
+    A similarity transform has 4 DOF (uniform scale, rotation, 2D translation):
+
+        [dx]   [ a  -b ] [sx]   [tx]
+        [dy] = [ b   a ] [sy] + [ty]
+
+    For N >= 2 point pairs this is overdetermined; we solve via least squares.
+    Returns a 3x3 affine matrix (perspective row is `[0, 0, 1]`) suitable for use
+    with PIL.Image.PERSPECTIVE coefficients.
+
+    This is the canonical ArcFace-family alignment (matches InsightFace's
+    `cv2.estimateAffinePartial2D` recipe). Unlike the 4-point perspective fit it
+    cannot match arbitrary 4-landmark configurations exactly, but it never
+    introduces shear or perspective distortion of the interior face pixels.
+    """
+    if len(src) != len(dst) or len(src) < 2:
+        raise ValueError(f"need >=2 matching point pairs, got src={len(src)} dst={len(dst)}")
+    n = len(src)
+    A = np.zeros((2 * n, 4), dtype=np.float64)
+    b = np.zeros(2 * n, dtype=np.float64)
+    for i, ((sx, sy), (dx, dy)) in enumerate(zip(src, dst)):
+        A[2 * i] = [sx, -sy, 1.0, 0.0]
+        A[2 * i + 1] = [sy, sx, 0.0, 1.0]
+        b[2 * i] = dx
+        b[2 * i + 1] = dy
+    soln, *_ = np.linalg.lstsq(A, b, rcond=None)
+    a, b_, tx, ty = soln
+    return np.array([
+        [a, -b_, tx],
+        [b_,  a, ty],
+        [0.0, 0.0, 1.0],
+    ], dtype=np.float64)
+
+
 def _perspective_4pt_homography(
     src: Sequence[Tuple[float, float]],
     dst: Sequence[Tuple[float, float]],
@@ -327,7 +366,11 @@ def _perspective_4pt_homography(
     homogeneous coordinates, with `h22 = 1`).
 
     Matches Android's `Matrix.setPolyToPoly(src, dst, count=4)` which fits a
-    perspective transform from 4 source points to 4 destination points.
+    perspective transform from 4 source points to 4 destination points. Provided
+    as an opt-in option (--alignment-mode perspective) for diagnostic parity
+    with the Android pipeline; not recommended for production use because the
+    8-DOF fit is numerically unstable when the underlying transform is closer
+    to a similarity (the typical case for face alignment).
     """
     if len(src) != 4 or len(dst) != 4:
         raise ValueError("perspective_4pt requires exactly 4 source and 4 destination points")
@@ -351,16 +394,29 @@ def _perspective_4pt_homography(
     ], dtype=np.float64)
 
 
+ALIGNMENT_MODE_SIMILARITY: str = "similarity"
+ALIGNMENT_MODE_PERSPECTIVE: str = "perspective"
+ALIGNMENT_MODES: Tuple[str, ...] = (ALIGNMENT_MODE_SIMILARITY, ALIGNMENT_MODE_PERSPECTIVE)
+
+
 def _warp_to_arcface(
     rgb_arr: np.ndarray,
     landmarks: Dict[str, Tuple[float, float]],
     output_size: int = INPUT_SIZE,
+    mode: str = ALIGNMENT_MODE_SIMILARITY,
 ) -> np.ndarray:
-    """Affinely warp the source RGB array to the canonical 112x112 ArcFace pose.
+    """Warp the source RGB array to the canonical 112x112 ArcFace pose.
 
-    Mirrors `FaceAligner.align`: builds a 4-point transform from the detected
-    (rightEye, leftEye, noseTip, mouthCenter) landmarks onto the ArcFace
-    canonical template, then applies it via PIL's PERSPECTIVE transform.
+    `mode = 'similarity'` (default, recommended) fits a 4-DOF similarity
+    transform (rotation + uniform scale + translation) by least squares - the
+    canonical ArcFace alignment recipe. Doesn't match the 4 landmarks exactly
+    but never distorts the interior of the face.
+
+    `mode = 'perspective'` fits an 8-DOF perspective transform that hits the 4
+    landmarks exactly, mirroring Android's `Matrix.setPolyToPoly(src, dst, 4)`.
+    Useful for parity testing with the on-device pipeline; produces unstable /
+    distorted crops when the underlying ground-truth transform is closer to a
+    similarity (the typical case).
     """
     src_pts = [
         landmarks["rightEye"],
@@ -373,7 +429,12 @@ def _warp_to_arcface(
     # cleanest way to get that is to solve the system with src and dst swapped:
     # given (output_pixel -> input_pixel) sample pairs, solve for the matrix that
     # maps any output pixel to its source location.
-    h_inv = _perspective_4pt_homography(dst_pts, src_pts)
+    if mode == ALIGNMENT_MODE_SIMILARITY:
+        h_inv = _similarity_2d_lstsq(dst_pts, src_pts)
+    elif mode == ALIGNMENT_MODE_PERSPECTIVE:
+        h_inv = _perspective_4pt_homography(dst_pts, src_pts)
+    else:
+        raise ValueError(f"unknown alignment mode {mode!r}; use one of {ALIGNMENT_MODES}")
     coeffs = (
         h_inv[0, 0], h_inv[0, 1], h_inv[0, 2],
         h_inv[1, 0], h_inv[1, 1], h_inv[1, 2],
@@ -414,6 +475,7 @@ def detect_and_align_face(
     blazeface_interp: tf.lite.Interpreter,
     score_threshold: float = BLAZEFACE_DEFAULT_SCORE_THRESHOLD,
     max_long_edge: int = DECODE_MAX_LONG_EDGE,
+    alignment_mode: str = ALIGNMENT_MODE_SIMILARITY,
 ) -> Tuple[Optional[np.ndarray], Dict]:
     """Mirror the Android pipeline up to the embedder input.
 
@@ -441,7 +503,7 @@ def detect_and_align_face(
     # Highest-confidence face wins, like Android's pickRepresentative does for
     # the largest crop -- but here we have no crop areas yet, so use score.
     face = max(faces, key=lambda f: f["score"])
-    aligned = _warp_to_arcface(rgb, face["landmarks"])
+    aligned = _warp_to_arcface(rgb, face["landmarks"], mode=alignment_mode)
     return aligned, {
         "reason": "aligned",
         "src_size": (w_src, h_src),
@@ -449,6 +511,7 @@ def detect_and_align_face(
         "landmarks": face["landmarks"],
         "score": face["score"],
         "n_detected": len(faces),
+        "alignment_mode": alignment_mode,
     }
 
 
@@ -573,6 +636,13 @@ def main(argv: Sequence[str]) -> int:
         help=f"Score threshold for BlazeFace (default {BLAZEFACE_DEFAULT_SCORE_THRESHOLD}).",
     )
     p.add_argument(
+        "--alignment-mode",
+        choices=ALIGNMENT_MODES,
+        default=ALIGNMENT_MODE_SIMILARITY,
+        help="Warp model: 'similarity' (4-DOF, recommended; canonical ArcFace alignment) "
+             "or 'perspective' (8-DOF, mirrors Android's setPolyToPoly(4); diagnostic only).",
+    )
+    p.add_argument(
         "--save-aligned-dir",
         type=Path,
         default=None,
@@ -606,6 +676,7 @@ def main(argv: Sequence[str]) -> int:
                 path,
                 blaze_interp,
                 score_threshold=args.blazeface_score_threshold,
+                alignment_mode=args.alignment_mode,
             )
             if aligned is None:
                 print(f"   ! skip {path.name}: {info.get('reason')} (src={info.get('src_size')})")
@@ -614,7 +685,8 @@ def main(argv: Sequence[str]) -> int:
             lm = info["landmarks"]
             print(
                 f"   aligned {path.name}: src={info['src_size']} "
-                f"score={info['score']:+.3f} n_det={info['n_detected']}"
+                f"score={info['score']:+.3f} n_det={info['n_detected']} "
+                f"mode={info['alignment_mode']}"
             )
             print(
                 f"      bbox=({info['bbox'][0]:.1f},{info['bbox'][1]:.1f},"
