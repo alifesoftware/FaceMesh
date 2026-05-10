@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">FaceMesh</string>
+    <string name="app_tagline">Discover and filter photos by the people in them</string>
+
+    <!-- Empty state -->
+    <string name="cd_add_photos">Add photos</string>
+    <string name="empty_state_headline">No clusters yet</string>
+
+    <!-- Selecting state -->
+    <string name="photos_selected_count">%1$d photos selected</string>
+    <string name="action_clusterify">Clusterify</string>
+    <string name="action_add_more_photos">Add more photos</string>
+
+    <!-- Clustered / Filter state -->
+    <string name="cd_camera_action">Pick photos to filter</string>
+    <string name="cd_filter_action">Run filter</string>
+
+    <!-- FAB labels (Material 3 ExtendedFAB) -->
+    <string name="action_add_photos">Add photos</string>
+    <string name="action_pick_filter_photos">Pick filter photos</string>
+    <string name="action_run_filter">Run filter</string>
+    <string name="cd_cluster_avatar">Cluster %1$d of %2$d, contains %3$d photos</string>
+    <string name="action_reset">Reset</string>
+    <string name="action_clear">Clear</string>
+    <string name="action_back">Back</string>
+
+    <!-- Processing -->
+    <string name="processing_photos">Processing %1$d / %2$d</string>
+    <string name="filtering_photos">Filtering %1$d / %2$d</string>
+    <string name="downloading_models">Downloading face models</string>
+    <string name="action_cancel">Cancel</string>
+
+    <!-- Dialogs -->
+    <string name="dialog_reset_title">Reset FaceMesh?</string>
+    <string name="dialog_reset_message">This will delete all clusters and any selected photos. This action cannot be undone.</string>
+    <string name="dialog_delete_cluster_title">Delete this cluster?</string>
+    <string name="dialog_delete_cluster_message">This cluster of %1$d photos will be permanently removed.</string>
+    <string name="action_delete">Delete</string>
+    <string name="action_confirm">Confirm</string>
+
+    <!-- Snackbar / toast -->
+    <string name="toast_no_faces_found">No faces found in the selected photos</string>
+    <string name="toast_no_matches_found">No matches found</string>
+    <string name="toast_using_cpu">Using CPU acceleration; processing may be slower</string>
+    <string name="toast_max_filter_images">A maximum of 15 photos can be selected for filtering</string>
+    <string name="toast_model_download_failed">Could not download face models</string>
+    <string name="action_retry">Retry</string>
+
+    <!-- Permissions -->
+    <string name="permission_rationale_title">Photo access required</string>
+    <string name="permission_rationale_message">FaceMesh needs access to your photos so it can cluster faces and run filters entirely on your device. No data leaves the device.</string>
+    <string name="action_grant">Grant access</string>
+    <string name="action_open_settings">Open settings</string>
+
+    <!-- Settings screen -->
+    <string name="settings_title">Settings</string>
+    <string name="cd_open_settings">Open settings</string>
+    <string name="settings_section_appearance">Appearance</string>
+    <string name="settings_dynamic_color_title">Use system wallpaper colors</string>
+    <string name="settings_dynamic_color_subtitle">Override the FaceMesh brand palette with Material You colors derived from your current wallpaper.</string>
+    <string name="settings_dynamic_color_unavailable">Requires Android 12 or newer.</string>
+</resources>

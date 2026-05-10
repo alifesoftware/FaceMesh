@@ -1,0 +1,35 @@
+# Dependencies for tools/convert_ghostfacenet_fp16.py
+#
+# Install into a Python 3.9+ venv:
+#     python -m venv .venv
+#     source .venv/bin/activate
+#     pip install -r tools/requirements.txt
+#
+# Versions are pinned to a known-good combination. The onnx2tf pipeline is
+# sensitive to drift across TF / Keras / NumPy / ONNX, so prefer not to bump
+# these casually; if you do, re-run the parity check (`-cotof` and the script's
+# cosine similarity) before shipping.
+
+# --- core conversion pipeline ---
+onnx==1.19.1
+onnxruntime==1.19.2
+onnx2tf==1.20.0
+
+# --- onnx2tf runtime deps that aren't auto-installed ---
+# (onnx2tf imports these at runtime but doesn't declare them.)
+onnx_graphsurgeon==0.6.1
+onnxsim==0.4.36
+sng4onnx==2.0.1          # simple Name Generator for onnx (auto-name nodes)
+sne4onnx==2.0.1          # simple Network Extractor for onnx (required by -cotof)
+ai-edge-litert==2.0.3
+psutil==7.2.2
+
+# --- TensorFlow + legacy Keras 2 ---
+# onnx2tf forces TF_USE_LEGACY_KERAS=1, which requires the tf_keras package
+# alongside the Keras 3 that ships with TF 2.16+.
+tensorflow==2.20.0
+tf_keras==2.20.1
+
+# --- numerics ---
+numpy==2.0.2
+protobuf==6.33.6

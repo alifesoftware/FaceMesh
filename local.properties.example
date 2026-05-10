@@ -1,0 +1,4 @@
+# Copy this file to `local.properties` (which is gitignored) and adjust paths as needed.
+# This file is read by Android Gradle Plugin to locate the Android SDK.
+
+sdk.dir=/Users/YOUR_USERNAME/Library/Android/sdk

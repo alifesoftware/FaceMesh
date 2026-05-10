@@ -1,0 +1,126 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 1,
+    "identityHash": "ecee060fe30f542653ae2472e0d0e2c8",
+    "entities": [
+      {
+        "tableName": "cluster",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `centroid` BLOB NOT NULL, `representativeImageUri` TEXT NOT NULL, `faceCount` INTEGER NOT NULL, `createdAt` INTEGER NOT NULL, `name` TEXT, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "centroid",
+            "columnName": "centroid",
+            "affinity": "BLOB",
+            "notNull": true
+          },
+          {
+            "fieldPath": "representativeImageUri",
+            "columnName": "representativeImageUri",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "faceCount",
+            "columnName": "faceCount",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "createdAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT",
+            "notNull": false
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "cluster_image",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`clusterId` TEXT NOT NULL, `imageUri` TEXT NOT NULL, `faceIndex` INTEGER NOT NULL, `embedding` BLOB NOT NULL, PRIMARY KEY(`clusterId`, `imageUri`, `faceIndex`), FOREIGN KEY(`clusterId`) REFERENCES `cluster`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "clusterId",
+            "columnName": "clusterId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "imageUri",
+            "columnName": "imageUri",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "faceIndex",
+            "columnName": "faceIndex",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "embedding",
+            "columnName": "embedding",
+            "affinity": "BLOB",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "clusterId",
+            "imageUri",
+            "faceIndex"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_cluster_image_clusterId",
+            "unique": false,
+            "columnNames": [
+              "clusterId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_cluster_image_clusterId` ON `${TABLE_NAME}` (`clusterId`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "cluster",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "clusterId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      }
+    ],
+    "views": [],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'ecee060fe30f542653ae2472e0d0e2c8')"
+    ]
+  }
+}

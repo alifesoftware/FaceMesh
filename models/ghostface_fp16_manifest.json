@@ -1,0 +1,11 @@
+{
+  "name": "ghostfacenet_fp16",
+  "size_bytes": 8155804,
+  "sha256": "4965f3463d0209a298d5409aa4c08d1f7d6d1e4ae15fbd6aafdaf0ab2478fe1c",
+  "input_shape": [1, 112, 112, 3],
+  "input_layout": "NHWC",
+  "input_dtype": "float32",
+  "input_normalization": "[-1, 1] via (px - 127.5) / 127.5",
+  "output_shape": [1, 512],
+  "embedding_dim": 512
+}

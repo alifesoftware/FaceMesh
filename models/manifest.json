@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "models": [
+    {
+      "type": "detector_blazeface_short_range",
+      "name": "face_detection_short_range.tflite",
+      "url": "face_detection_short_range.tflite",
+      "sha256": "3bc182eb9f33925d9e58b5c8d59308a760f4adea8f282370e428c51212c26633"
+    },
+    {
+      "type": "embedder_ghostfacenet_fp16",
+      "name": "ghostface_fp16.tflite",
+      "url": "ghostface_fp16.tflite",
+      "sha256": "4965f3463d0209a298d5409aa4c08d1f7d6d1e4ae15fbd6aafdaf0ab2478fe1c"
+    }
+  ],
+  "config": {
+    "dbscan_eps": 0.35,
+    "dbscan_min_pts": 2,
+    "match_threshold": 0.65,
+    "detector_input": [128, 128],
+    "embedder_input": [112, 112]
+  }
+}
