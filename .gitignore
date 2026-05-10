@@ -34,3 +34,6 @@ google-services.json
 *.hprof
 
 .venv/
+
+# macOS Finder metadata
+.DS_Store
