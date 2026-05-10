@@ -97,12 +97,17 @@ object PipelineConfig {
          * Default variant for first launches. Existing installs preserve their saved choice.
          *
          *   - Class:    USER SETTING DEFAULT
-         *   - Why SHORT_RANGE:  non-surprising upgrade path for users on the previous
-         *               (single-variant) build. Flipping to FULL_RANGE as the global default
-         *               is something to revisit once we have telemetry on detection-quality
-         *               improvements vs. inference-cost differences in production.
+         *   - Why FULL_RANGE: empirical real-world testing on a 25-photo set showed full-
+         *               range detected 32 faces vs short-range's 15 (more than 2x recall),
+         *               recovered every photo short-range was returning 0 faces on, and
+         *               produced tighter same-person cosine distances (best 0.17 vs 0.23).
+         *               The +20% per-image inference cost is acceptable on modern phones;
+         *               the +1.1 MB model file is a one-time download. New users start with
+         *               the better experience by default; the user can switch back to
+         *               short-range from Settings if they want lower latency on
+         *               selfie-distance frontal-only photo libraries.
          */
-        val defaultVariant: DetectorVariant = DetectorVariant.SHORT_RANGE
+        val defaultVariant: DetectorVariant = DetectorVariant.FULL_RANGE
 
         /**
          * Minimum sigmoid score for a candidate anchor to survive the decoder pass. Shared
