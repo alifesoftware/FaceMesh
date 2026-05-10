@@ -379,10 +379,10 @@ Group photos contain people the user did **not** intend to cluster. DBSCAN's noi
 
 | Parameter | Default | Range | Source priority |
 |-----------|---------|-------|-----------------|
-| `eps` (max cosine distance for neighbour) | 0.35 | 0.10 – 0.80 | user override > manifest > config |
+| `eps` (max cosine distance for neighbour) | 0.50 | 0.10 – 0.80 | user override > manifest > config |
 | `minPts` (min neighbours incl. self for core) | 2    | 1 – 10      | manifest > config (no user slider) |
 
-`eps = 0.35` is the empirical sweet spot on GhostFaceNet 512-d L2-normed embeddings.
+`eps = 0.50` is the current default after offline sweeps on mixed libraries; GhostFaceNet 512-d cosine distances vary enough that Settings still exposes a slider and the shipped `manifest.json` can override remotely.
 
 `minPts = 2` is the lowest useful value: any two faces above the eps similarity threshold form a cluster — matches the small-library v1 UX (one duplicate of a person is enough to surface them).
 
@@ -529,7 +529,7 @@ The three shipped TFLite models live as a sidecar bundle, downloaded on first la
     { "type": "embedder_ghostfacenet_fp16",     "name": "ghostface_fp16.tflite",             ... }
   ],
   "config": {
-    "dbscan_eps": 0.35,
+    "dbscan_eps": 0.5,
     "dbscan_min_pts": 2,
     "match_threshold": 0.65,
     "detector_short_range_input": [128, 128],
@@ -592,7 +592,7 @@ The `Source` is logged on every Clusterify / Filter run so the diagnostic log st
 | `Embedder.embeddingDim` | 512 | Model contract | — | — |
 | `DisplayCrop.paddingFraction` | 0.30 | Compile-time | Tighter avatar | Roomier with more context |
 | `DisplayCrop.maxOutputDim` | 256 | Compile-time | Smaller PNG, aliasing on HDPI | Crisper, more storage |
-| `Clustering.defaultEps` | 0.35 | User pref | Tighter clusters, more splits | Looser clusters, more merges |
+| `Clustering.defaultEps` | 0.50 | User pref | Tighter clusters, more splits | Looser clusters, more merges |
 | `Clustering.defaultMinPts` | 2 | Manifest/config | minPts=1 trivialises DBSCAN | Single-photo people drop as noise |
 | `Match.defaultThreshold` | 0.65 | User pref | More keepers (recall ↑, precision ↓) | Fewer keepers (precision ↑, recall ↓) |
 
@@ -751,5 +751,5 @@ sequenceDiagram
 3. **Filter** — drop low-confidence, non-human-geometry, and (optionally) wildly-sized boxes before paying for alignment + embedding.
 4. **Align** — least-squares similarity warp to ArcFace canonical 112×112, the pose GhostFaceNet was trained on.
 5. **Embed** — GhostFaceNet-V1 FP16 → 512-d vector → L2-normalise so dot product == cosine similarity.
-6. **Cluster** (Clusterify) — DBSCAN with eps=0.35, minPts=2 over cosine distance; centroid = L2-normed mean.
+6. **Cluster** (Clusterify) — DBSCAN with eps≈0.50 (manifest / user override possible), minPts=2 over cosine distance; centroid = L2-normed mean.
 7. **Match** (Filter) — image is a Keeper iff any face's dot product with any selected centroid ≥ 0.65.

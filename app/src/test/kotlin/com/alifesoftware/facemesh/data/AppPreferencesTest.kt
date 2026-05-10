@@ -61,7 +61,7 @@ class AppPreferencesTest {
 
     @Test
     fun `dbscan defaults are present`() = runTest {
-        assertEquals(0.35f, prefs.dbscanEps.first(), 1e-6f)
+        assertEquals(PipelineConfig.Clustering.defaultEps, prefs.dbscanEps.first(), 1e-6f)
         assertEquals(2, prefs.dbscanMinPts.first())
     }
 

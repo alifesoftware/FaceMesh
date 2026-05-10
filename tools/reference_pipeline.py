@@ -36,7 +36,7 @@ Tuning DBSCAN (optional `--eps`; default matches the app):
     Cosine *distance* is d = 1 - cos_similarity between L2-normalised embeddings.
     Larger ``--eps`` merges more aggressively (fewer clusters / less noise).
 
-    Typical sweep when results feel too fragmented: 0.30, 0.35, 0.40, 0.45, 0.50.
+    Typical sweep when results feel too fragmented: 0.35, 0.40, 0.45, 0.50, 0.55.
 
 Optional: pass `--label me` etc. alongside each `--folder` to attach a custom
 ground-truth label; default label is the folder's basename.
@@ -101,7 +101,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 MODELS_DIR = REPO_ROOT / "models"
 
 # DBSCAN defaults mirror PipelineConfig.Clustering on the Kotlin side.
-DBSCAN_DEFAULT_EPS: float = 0.35
+DBSCAN_DEFAULT_EPS: float = 0.50
 DBSCAN_DEFAULT_MIN_PTS: int = 2
 
 # Match phase default (PipelineConfig.Match.defaultThreshold). Used only in the
@@ -593,16 +593,16 @@ embeddings (same as Android). Larger --eps merges neighbours more aggressively.
 Suggested values to compare on the SAME inputs (reuse --out dirs or --quiet):
 
   Strict (more clusters / more noise — split identities easier):
-      --eps 0.28  --eps 0.30  --eps 0.32
+      --eps 0.28  --eps 0.30  --eps 0.35
 
-  Balanced — default matches PipelineConfig / in-app slider centre:
-      --eps 0.35
+  Around app default — matches PipelineClustering.defaultEps / manifest baseline:
+      --eps 0.50
 
-  Looser — merge more lighting/pose variants of one person:
+  Tighter-than-default diagnostics:
       --eps 0.38  --eps 0.40  --eps 0.42
 
-  Very loose — only when too fragmented at 0.40; risks merging relatives:
-      --eps 0.45  --eps 0.50
+  Looser — if still noisy at 0.50; watch for relative merges:
+      --eps 0.55  --eps 0.60
 
   --min-pts tweaks (default %(min)d):
       --min-pts 2   two faces suffice to seed a cluster (current app default).

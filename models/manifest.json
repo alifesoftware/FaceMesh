@@ -21,7 +21,7 @@
     }
   ],
   "config": {
-    "dbscan_eps": 0.35,
+    "dbscan_eps": 0.5,
     "dbscan_min_pts": 2,
     "match_threshold": 0.65,
     "detector_short_range_input": [128, 128],

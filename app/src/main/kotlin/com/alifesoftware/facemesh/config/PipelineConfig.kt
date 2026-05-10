@@ -498,9 +498,13 @@ object PipelineConfig {
          *               expression; safer when face library is small and clean.
          *   - Higher:   looser clusters, more "different people" merges. Useful when faces
          *               are noisier (small / blurry / aged-out).
-         *   - Why 0.35: empirical sweet spot on GhostFaceNet 512-d L2-normed embeddings.
+         *   - Why 0.50: Offline sweeps on mixed couple + group camera rolls matched this
+         *               zone (fewer singleton noise faces than at 0.35) without the pathological
+         *               merging seen at eps around 0.65+. GhostFaceNet 512-d cosine distances still
+         *               merit a Settings slider sweep per library — this is only the fresh-
+         *               install / no-manifest fallback default.
          */
-        const val defaultEps: Float = 0.35f
+        const val defaultEps: Float = 0.50f
         const val minEps: Float = 0.10f
         const val maxEps: Float = 0.80f
 

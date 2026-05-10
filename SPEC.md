@@ -376,7 +376,7 @@ flowchart LR
 
 ### 6.5 Step 5a — Clustering (Clusterify only)
 - Algorithm: **DBSCAN** with cosine distance.
-- Default params (overridable from config.json in §8): `eps = 0.35` (cosine distance, equivalent to similarity ≥ 0.65 for membership), `minPts = 2`.
+- Default params (overridable from config.json in §8): `eps = 0.5` (cosine distance — two unit embeddings are neighbours when `1 - dot(a,b) ≤ eps`, i.e. cosine similarity ≥ `1 - eps` = ≥ 0.5 at default), `minPts = 2`.
 - Each cluster's centroid is the mean of its members' embeddings, then re-L2-normalized.
 - Noise points (DBSCAN label -1) are silently ignored in v1 (open question §12).
 
@@ -446,7 +446,7 @@ interface ClusterDao {
 
 | Key                      | Type    | Default | Purpose                                                |
 |--------------------------|---------|---------|--------------------------------------------------------|
-| `dbscan_eps`             | Float   | 0.35    | Allow tuning from downloaded `config.json`             |
+| `dbscan_eps`             | Float   | 0.5     | Allow tuning from downloaded `config.json`             |
 | `dbscan_min_pts`         | Int     | 2       | Same                                                   |
 | `match_threshold`        | Float   | 0.65    | Filter cosine similarity threshold (GhostFaceNet-V1 512-d) |
 | `models_version`         | Int     | 0       | Currently installed sidecar bundle version             |
@@ -487,7 +487,7 @@ Hosted at `<MODEL_BASE_URL>/manifest.json` (URL TBD — see §12):
     }
   ],
   "config": {
-    "dbscan_eps": 0.35,
+    "dbscan_eps": 0.5,
     "dbscan_min_pts": 2,
     "match_threshold": 0.65,
     "detector_input": [128, 128],

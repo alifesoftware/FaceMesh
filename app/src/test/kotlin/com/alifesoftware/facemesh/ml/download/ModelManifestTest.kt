@@ -29,7 +29,7 @@ class ModelManifestTest {
             }
           ],
           "config": {
-            "dbscan_eps": 0.35,
+            "dbscan_eps": 0.5,
             "dbscan_min_pts": 2,
             "match_threshold": 0.65,
             "detector_input": [128, 128],
@@ -62,7 +62,7 @@ class ModelManifestTest {
             }
           ],
           "config": {
-            "dbscan_eps": 0.35,
+            "dbscan_eps": 0.5,
             "dbscan_min_pts": 2,
             "match_threshold": 0.65,
             "detector_short_range_input": [128, 128],
@@ -85,7 +85,7 @@ class ModelManifestTest {
         val emb = m.models.first { it.type == ModelDescriptor.TYPE_EMBEDDER }
         assertEquals("ghostface_fp16.tflite", emb.name)
 
-        assertEquals(0.35f, m.config.dbscanEps, 1e-6f)
+        assertEquals(0.5f, m.config.dbscanEps, 1e-6f)
         assertEquals(2, m.config.dbscanMinPts)
         assertEquals(0.65f, m.config.matchThreshold, 1e-6f)
         assertArrayEquals(intArrayOf(128, 128), m.config.shortRangeDetectorInput)
