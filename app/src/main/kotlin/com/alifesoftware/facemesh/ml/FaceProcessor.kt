@@ -147,8 +147,16 @@ class FaceProcessor(
                 return null
             }
 
-            val cropSize = (faceMaxSide * (1f + 2f * paddingFraction))
-                .coerceAtMost(min(source.width, source.height).toFloat())
+            val paddedSquare = faceMaxSide * (1f + 2f * paddingFraction)
+            val sourceMinSide = min(source.width, source.height).toFloat()
+            val cropSize = paddedSquare.coerceAtMost(sourceMinSide)
+            if (paddedSquare > sourceMinSide) {
+                Log.i(
+                    TAG,
+                    "cropDisplayThumbnail: paddedSquare=${"%.1f".format(paddedSquare)} > " +
+                        "sourceMinSide=$sourceMinSide; CLAMP cropSize=${"%.1f".format(cropSize)}",
+                )
+            }
             val half = cropSize / 2f
 
             var left = cx - half
@@ -157,16 +165,45 @@ class FaceProcessor(
             var bottom = cy + half
 
             // Shift the crop to stay square against source edges.
-            if (left < 0f) { right -= left; left = 0f }
-            if (top < 0f) { bottom -= top; top = 0f }
-            if (right > source.width) { left -= (right - source.width); right = source.width.toFloat() }
-            if (bottom > source.height) { top -= (bottom - source.height); bottom = source.height.toFloat() }
+            if (left < 0f) {
+                Log.i(TAG, "cropDisplayThumbnail: SHIFT left underflow=${"%.1f".format(-left)}")
+                right -= left; left = 0f
+            }
+            if (top < 0f) {
+                Log.i(TAG, "cropDisplayThumbnail: SHIFT top underflow=${"%.1f".format(-top)}")
+                bottom -= top; top = 0f
+            }
+            if (right > source.width) {
+                Log.i(
+                    TAG,
+                    "cropDisplayThumbnail: SHIFT right overflow=${"%.1f".format(right - source.width)}",
+                )
+                left -= (right - source.width); right = source.width.toFloat()
+            }
+            if (bottom > source.height) {
+                Log.i(
+                    TAG,
+                    "cropDisplayThumbnail: SHIFT bottom overflow=${"%.1f".format(bottom - source.height)}",
+                )
+                top -= (bottom - source.height); bottom = source.height.toFloat()
+            }
 
             // Final clamp guards against pathological inputs.
+            val preClampL = left; val preClampT = top; val preClampR = right; val preClampB = bottom
             left = left.coerceAtLeast(0f)
             top = top.coerceAtLeast(0f)
             right = right.coerceAtMost(source.width.toFloat())
             bottom = bottom.coerceAtMost(source.height.toFloat())
+            if (left != preClampL || top != preClampT || right != preClampR || bottom != preClampB) {
+                Log.i(
+                    TAG,
+                    "cropDisplayThumbnail: FINAL CLAMP " +
+                        "from=[${"%.1f".format(preClampL)},${"%.1f".format(preClampT)}," +
+                        "${"%.1f".format(preClampR)},${"%.1f".format(preClampB)}] " +
+                        "to=[${"%.1f".format(left)},${"%.1f".format(top)}," +
+                        "${"%.1f".format(right)},${"%.1f".format(bottom)}]",
+                )
+            }
 
             val w = (right - left).toInt().coerceAtLeast(1)
             val h = (bottom - top).toInt().coerceAtLeast(1)

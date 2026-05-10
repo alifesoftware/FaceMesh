@@ -47,9 +47,21 @@ class BlazeFaceDecoder(
         val sx = sourceWidth.toFloat() / inputSize
         val sy = sourceHeight.toFloat() / inputSize
 
+        var droppedLowScore = 0
+        var droppedDegenerate = 0
+        var topLogit = Float.NEGATIVE_INFINITY
+        var topScore = 0f
+
         for (i in anchors.indices) {
             val score = sigmoid(classifications[i])
-            if (score < scoreThreshold) continue
+            if (classifications[i] > topLogit) {
+                topLogit = classifications[i]
+                topScore = score
+            }
+            if (score < scoreThreshold) {
+                droppedLowScore++
+                continue
+            }
             val anchor = anchors[i]
             val base = i * REG_STRIDE
 
@@ -70,7 +82,15 @@ class BlazeFaceDecoder(
                 right.coerceIn(0f, sourceWidth.toFloat()),
                 bottom.coerceIn(0f, sourceHeight.toFloat()),
             )
-            if (rect.width() <= 0f || rect.height() <= 0f) continue
+            if (rect.width() <= 0f || rect.height() <= 0f) {
+                droppedDegenerate++
+                Log.i(
+                    TAG,
+                    "decode: anchor[$i] dropped degenerate rect=$rect (raw l=$left,t=$top,r=$right,b=$bottom) " +
+                        "score=${"%.3f".format(score)}",
+                )
+                continue
+            }
 
             val landmarks = FaceLandmarks(
                 rightEye = readLandmark(regressors, base + 4, anchor, sx, sy, sourceWidth, sourceHeight),
@@ -80,9 +100,21 @@ class BlazeFaceDecoder(
                 rightEarTragion = readLandmark(regressors, base + 12, anchor, sx, sy, sourceWidth, sourceHeight),
                 leftEarTragion = readLandmark(regressors, base + 14, anchor, sx, sy, sourceWidth, sourceHeight),
             )
+            Log.i(
+                TAG,
+                "decode: anchor[$i] kept score=${"%.3f".format(score)} bbox=$rect " +
+                    "anchorCenter=(${anchor.cx},${anchor.cy}) regOffset=(${regressors[base]},${regressors[base + 1]}) " +
+                    "regSize=(${w},${h})",
+            )
             candidates += DetectedFace(rect, landmarks, score)
         }
 
+        Log.i(
+            TAG,
+            "decode: scanned ${anchors.size} anchors topLogit=${"%.3f".format(topLogit)} " +
+                "topScore=${"%.3f".format(topScore)} droppedLowScore=$droppedLowScore " +
+                "droppedDegenerate=$droppedDegenerate kept=${candidates.size} (threshold=$scoreThreshold)",
+        )
         val kept = weightedNms(candidates, iouThreshold)
         Log.i(
             TAG,
@@ -111,9 +143,13 @@ class BlazeFaceDecoder(
         candidates: List<DetectedFace>,
         iou: Float,
     ): List<DetectedFace> {
-        if (candidates.isEmpty()) return emptyList()
+        if (candidates.isEmpty()) {
+            Log.i(TAG, "weightedNms: no candidates -> early return empty")
+            return emptyList()
+        }
         val sorted = candidates.sortedByDescending { it.score }.toMutableList()
         val kept = ArrayList<DetectedFace>()
+        var groupIndex = 0
         while (sorted.isNotEmpty()) {
             val anchor = sorted.removeAt(0)
             val overlapping = ArrayList<DetectedFace>()
@@ -121,13 +157,28 @@ class BlazeFaceDecoder(
             val iter = sorted.iterator()
             while (iter.hasNext()) {
                 val other = iter.next()
-                if (intersectionOverUnion(anchor.boundingBox, other.boundingBox) > iou) {
+                val iouValue = intersectionOverUnion(anchor.boundingBox, other.boundingBox)
+                if (iouValue > iou) {
+                    Log.i(
+                        TAG,
+                        "weightedNms: group[$groupIndex] absorbing overlap " +
+                            "anchorScore=${"%.3f".format(anchor.score)} " +
+                            "otherScore=${"%.3f".format(other.score)} iou=${"%.3f".format(iouValue)}",
+                    )
                     overlapping += other
                     iter.remove()
                 }
             }
-            kept += weightedAverage(overlapping)
+            val merged = weightedAverage(overlapping)
+            Log.i(
+                TAG,
+                "weightedNms: group[$groupIndex] anchorScore=${"%.3f".format(anchor.score)} " +
+                    "merged=${overlapping.size} bbox=${merged.boundingBox}",
+            )
+            kept += merged
+            groupIndex++
         }
+        Log.i(TAG, "weightedNms: produced ${kept.size} group(s) from ${candidates.size} candidate(s)")
         return kept
     }
 

@@ -107,6 +107,10 @@ class ClusterifyUseCase(
 
         val resultClusters = ArrayList<Cluster>(grouped.size)
         for ((label, members) in grouped) {
+            Log.i(
+                TAG,
+                "run: cluster label=$label members=${members.size} sourceUris=${members.map { it.sourceUri }}",
+            )
             val centroid = EmbeddingMath.meanAndNormalize(members.map { it.embedding })
             val rep = pickRepresentative(members)
             // FaceProcessor produces a natural display crop for every accepted face when
@@ -153,11 +157,27 @@ class ClusterifyUseCase(
      * available natural display crop (largest face = closest to the camera = best chance of a
      * recognisable thumbnail), falling back to the first member if none have a crop.
      */
-    private fun pickRepresentative(members: List<FaceProcessor.FaceRecord>): FaceProcessor.FaceRecord =
-        members
-            .filter { it.displayCrop != null }
-            .maxByOrNull { (it.displayCrop?.width ?: 0) * (it.displayCrop?.height ?: 0) }
-            ?: members.first()
+    private fun pickRepresentative(members: List<FaceProcessor.FaceRecord>): FaceProcessor.FaceRecord {
+        val withCrop = members.filter { it.displayCrop != null }
+        if (withCrop.isEmpty()) {
+            Log.w(
+                TAG,
+                "pickRepresentative: no members have displayCrop; falling back to members[0] " +
+                    "sourceUri=${members.first().sourceUri}",
+            )
+            return members.first()
+        }
+        val winner = withCrop.maxByOrNull {
+            (it.displayCrop?.width ?: 0) * (it.displayCrop?.height ?: 0)
+        }!!
+        val area = (winner.displayCrop?.width ?: 0) * (winner.displayCrop?.height ?: 0)
+        Log.i(
+            TAG,
+            "pickRepresentative: chose ${winner.sourceUri} faceIdx=${winner.faceIndex} " +
+                "cropArea=$area (${withCrop.size}/${members.size} candidates with crops)",
+        )
+        return winner
+    }
 
     /** Persists a representative thumbnail as PNG into private app files; returns its file:// Uri. */
     private fun saveRepresentative(bitmap: Bitmap): Uri {

@@ -29,31 +29,66 @@ class Dbscan(
         Log.i(TAG, "run: start n=$n eps=$eps minPts=$minPts")
 
         var clusterId = 0
+        var corePoints = 0
+        var borderPoints = 0
+        var coreExpansions = 0
         for (i in 0 until n) {
-            if (labels[i] != UNVISITED) continue
+            if (labels[i] != UNVISITED) {
+                Log.i(TAG, "run: point[$i] SKIP already labelled=${labels[i]}")
+                continue
+            }
             val neighbours = regionQuery(points, i)
             if (neighbours.size < minPts) {
                 labels[i] = NOISE
+                Log.i(
+                    TAG,
+                    "run: point[$i] MARK noise neighbours=${neighbours.size} < minPts=$minPts",
+                )
                 continue
             }
             // Expand cluster.
             labels[i] = clusterId
+            corePoints++
+            Log.i(
+                TAG,
+                "run: point[$i] CORE seeding cluster=$clusterId neighbours=${neighbours.size}",
+            )
             val seeds = ArrayDeque<Int>()
             seeds.addAll(neighbours)
+            var clusterMembers = 1
             while (seeds.isNotEmpty()) {
                 val q = seeds.removeFirst()
                 if (q == i) continue
                 if (labels[q] == NOISE) {
                     labels[q] = clusterId
+                    clusterMembers++
+                    borderPoints++
+                    Log.i(
+                        TAG,
+                        "run: point[$q] PROMOTE noise->cluster=$clusterId (border, via core[$i])",
+                    )
                 }
                 if (labels[q] != UNVISITED) continue
                 labels[q] = clusterId
+                clusterMembers++
                 val qNeighbours = regionQuery(points, q)
                 if (qNeighbours.size >= minPts) {
+                    corePoints++
+                    coreExpansions++
+                    Log.i(
+                        TAG,
+                        "run: point[$q] CORE expanding cluster=$clusterId neighbours=${qNeighbours.size}",
+                    )
                     seeds.addAll(qNeighbours)
+                } else {
+                    borderPoints++
+                    Log.i(
+                        TAG,
+                        "run: point[$q] BORDER cluster=$clusterId neighbours=${qNeighbours.size} < minPts=$minPts",
+                    )
                 }
             }
-            Log.i(TAG, "run: closed cluster id=$clusterId (members so far counted at end)")
+            Log.i(TAG, "run: closed cluster id=$clusterId memberCount=$clusterMembers")
             clusterId++
         }
         val noiseCount = labels.count { it == NOISE }
@@ -62,8 +97,9 @@ class Dbscan(
         val took = SystemClock.elapsedRealtime() - started
         Log.i(
             TAG,
-            "run: done n=$n clusters=$clusterId noise=$noiseCount sizes=${sizesByCluster.toList()} " +
-                "took=${took}ms",
+            "run: done n=$n clusters=$clusterId noise=$noiseCount " +
+                "corePoints=$corePoints borderPoints=$borderPoints expansions=$coreExpansions " +
+                "sizes=${sizesByCluster.toList()} took=${took}ms",
         )
         return labels
     }
@@ -71,11 +107,21 @@ class Dbscan(
     private fun regionQuery(points: List<FloatArray>, index: Int): List<Int> {
         val origin = points[index]
         val out = ArrayList<Int>()
+        var minD = Float.POSITIVE_INFINITY
+        var maxD = Float.NEGATIVE_INFINITY
         for (j in points.indices) {
-            if (EmbeddingMath.cosineDistance(origin, points[j]) <= eps) {
-                out += j
+            val d = EmbeddingMath.cosineDistance(origin, points[j])
+            if (j != index) {
+                if (d < minD) minD = d
+                if (d > maxD) maxD = d
             }
+            if (d <= eps) out += j
         }
+        Log.i(
+            TAG,
+            "regionQuery: point[$index] neighbours=${out.size} (within eps=$eps) " +
+                "distRange=[${"%.4f".format(minD)}..${"%.4f".format(maxD)}]",
+        )
         return out
     }
 

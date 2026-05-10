@@ -69,10 +69,18 @@ object BitmapDecoder {
         var sample = 1
         var w = width
         var h = height
+        var iter = 0
         while (max(w, h) > maxDim) {
             sample *= 2
             w /= 2
             h /= 2
+            iter++
+            Log.i(TAG, "computeInSampleSize: halving #$iter -> sample=$sample est=${w}x${h} (target<=$maxDim)")
+        }
+        if (iter == 0) {
+            Log.i(TAG, "computeInSampleSize: ${width}x${height} already fits ${maxDim}; sample=1")
+        } else {
+            Log.i(TAG, "computeInSampleSize: ${width}x${height} -> sample=$sample after $iter halving(s)")
         }
         return sample
     }

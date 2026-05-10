@@ -1,5 +1,6 @@
 package com.alifesoftware.facemesh.ml.cluster
 
+import android.util.Log
 import kotlin.math.sqrt
 
 /**
@@ -9,6 +10,8 @@ import kotlin.math.sqrt
  * the helpers work for any equal-length pair.
  */
 object EmbeddingMath {
+
+    private const val TAG: String = "FaceMesh.EmbedMath"
 
     /**
      * Mutates [vec] in place to have unit L2 norm. Returns [vec] for chaining. Vectors with
@@ -20,11 +23,13 @@ object EmbeddingMath {
         for (v in vec) sum += v.toDouble() * v
         val norm = sqrt(sum)
         if (norm < 1e-8) {
+            Log.w(TAG, "l2NormalizeInPlace: norm=$norm (<1e-8); zero-filling ${vec.size}-d vector")
             vec.fill(0f)
             return vec
         }
         val inv = (1.0 / norm).toFloat()
         for (i in vec.indices) vec[i] *= inv
+        Log.i(TAG, "l2NormalizeInPlace: dim=${vec.size} norm=${"%.4f".format(norm)} -> unit (scale=${"%.4f".format(inv.toDouble())})")
         return vec
     }
 
@@ -46,6 +51,7 @@ object EmbeddingMath {
     fun meanAndNormalize(vectors: List<FloatArray>): FloatArray {
         require(vectors.isNotEmpty()) { "Cannot average an empty list" }
         val dim = vectors.first().size
+        Log.i(TAG, "meanAndNormalize: averaging ${vectors.size} vector(s) of dim=$dim")
         val out = FloatArray(dim)
         for (v in vectors) {
             require(v.size == dim) { "dimension mismatch in meanAndNormalize" }

@@ -60,20 +60,57 @@ class FilterAgainstClustersUseCase(
             yield()
             try {
                 val faces = processor.process(uri, keepDisplayCrop = false)
+                if (faces.isEmpty()) {
+                    Log.i(
+                        TAG,
+                        "run: ${index + 1}/${images.size} uri=$uri DROP no faces detected",
+                    )
+                    emit(Event.Progress(processed = index + 1, total = images.size))
+                    return@forEachIndexed
+                }
                 var bestScore = Float.NEGATIVE_INFINITY
-                val isKeeper = faces.any { face ->
-                    centroids.any { centroid ->
+                var bestFaceIdx = -1
+                var bestCentroidIdx = -1
+                var matchingCentroidIdx = -1
+                var matchingFaceIdx = -1
+                outer@ for ((fIdx, face) in faces.withIndex()) {
+                    for ((cIdx, centroid) in centroids.withIndex()) {
                         val score = EmbeddingMath.dot(face.embedding, centroid)
-                        if (score > bestScore) bestScore = score
-                        score >= matchThreshold
+                        Log.i(
+                            TAG,
+                            "run: ${index + 1}/${images.size} uri=$uri " +
+                                "face[$fIdx] vs centroid[$cIdx] score=${"%.3f".format(score)} " +
+                                "(threshold=$matchThreshold)",
+                        )
+                        if (score > bestScore) {
+                            bestScore = score
+                            bestFaceIdx = fIdx
+                            bestCentroidIdx = cIdx
+                        }
+                        if (score >= matchThreshold) {
+                            matchingFaceIdx = fIdx
+                            matchingCentroidIdx = cIdx
+                            break@outer
+                        }
                     }
                 }
-                Log.i(
-                    TAG,
-                    "run: ${index + 1}/${images.size} uri=$uri faces=${faces.size} " +
-                        "bestScore=${"%.3f".format(bestScore)} threshold=$matchThreshold keep=$isKeeper",
-                )
-                if (isKeeper) keepers += uri
+                val isKeeper = matchingCentroidIdx >= 0
+                if (isKeeper) {
+                    Log.i(
+                        TAG,
+                        "run: ${index + 1}/${images.size} uri=$uri KEEP " +
+                            "via face[$matchingFaceIdx] x centroid[$matchingCentroidIdx] " +
+                            "(threshold=$matchThreshold first-match short-circuited)",
+                    )
+                    keepers += uri
+                } else {
+                    Log.i(
+                        TAG,
+                        "run: ${index + 1}/${images.size} uri=$uri DROP " +
+                            "bestScore=${"%.3f".format(bestScore)} " +
+                            "(face[$bestFaceIdx] vs centroid[$bestCentroidIdx]) < $matchThreshold",
+                    )
+                }
             } catch (e: Exception) {
                 Log.w(TAG, "run: processor failed for uri=$uri (${index + 1}/${images.size}); skipping", e)
             }
