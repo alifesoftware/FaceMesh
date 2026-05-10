@@ -72,15 +72,32 @@ EMBEDDING_DIM = 512     # GhostFaceNet output dim
 
 
 # ---------------------------------------------------------------------------
-# BlazeFace short-range (Python port of BlazeFaceAnchors / BlazeFaceDecoder)
+# BlazeFace (Python port of both detector variants from the Android pipeline)
 # ---------------------------------------------------------------------------
 
 # These constants mirror PipelineConfig.Detector and PipelineConfig.Filters
 # defaults so that running this script on the same image as the Android app
 # yields the same detected faces and landmarks.
-BLAZEFACE_INPUT_SIZE: int = 128
-BLAZEFACE_NUM_ANCHORS: int = 896
-BLAZEFACE_REG_STRIDE: int = 16
+DETECTOR_VARIANT_SHORT_RANGE: str = "short_range"
+DETECTOR_VARIANT_FULL_RANGE: str = "full_range"
+DETECTOR_VARIANTS: Tuple[str, ...] = (DETECTOR_VARIANT_SHORT_RANGE, DETECTOR_VARIANT_FULL_RANGE)
+
+# Short-range model contract (mirrors PipelineConfig.Detector.ShortRange).
+BLAZEFACE_SR_INPUT_SIZE: int = 128
+BLAZEFACE_SR_NUM_ANCHORS: int = 896
+BLAZEFACE_SR_REG_STRIDE: int = 16
+
+# Full-range model contract (mirrors PipelineConfig.Detector.FullRange).
+BLAZEFACE_FR_INPUT_SIZE: int = 192
+BLAZEFACE_FR_NUM_ANCHORS: int = 2304
+BLAZEFACE_FR_REG_STRIDE: int = 16
+
+# Backward-compat aliases pointing at the short-range constants. Older callers
+# (and some downstream tooling) reference the un-prefixed names.
+BLAZEFACE_INPUT_SIZE: int = BLAZEFACE_SR_INPUT_SIZE
+BLAZEFACE_NUM_ANCHORS: int = BLAZEFACE_SR_NUM_ANCHORS
+BLAZEFACE_REG_STRIDE: int = BLAZEFACE_SR_REG_STRIDE
+
 BLAZEFACE_DEFAULT_SCORE_THRESHOLD: float = 0.55
 BLAZEFACE_NMS_IOU_THRESHOLD: float = 0.30
 DECODE_MAX_LONG_EDGE: int = 1280   # mirrors PipelineConfig.Decode.maxLongEdgePx
@@ -99,11 +116,8 @@ LANDMARK_NAMES: Tuple[str, ...] = (
 )
 
 
-def _generate_blazeface_anchors() -> np.ndarray:
-    """Return a (NUM_ANCHORS, 2) float array of normalised anchor centres.
-
-    Mirrors `BlazeFaceAnchors.FRONT_128`: 16x16 grid x 2 anchors + 8x8 grid x 6 anchors.
-    """
+def _generate_blazeface_anchors_short_range() -> np.ndarray:
+    """Mirrors `BlazeFaceShortRangeAnchors.FRONT_128`: 16x16x2 + 8x8x6 = 896 anchors."""
     out: List[Tuple[float, float]] = []
     for grid_size, anchors_per_cell in ((16, 2), (8, 6)):
         for y in range(grid_size):
@@ -113,8 +127,27 @@ def _generate_blazeface_anchors() -> np.ndarray:
                 for _ in range(anchors_per_cell):
                     out.append((cx, cy))
     arr = np.asarray(out, dtype=np.float32)
-    assert arr.shape == (BLAZEFACE_NUM_ANCHORS, 2), arr.shape
+    assert arr.shape == (BLAZEFACE_SR_NUM_ANCHORS, 2), arr.shape
     return arr
+
+
+def _generate_blazeface_anchors_full_range() -> np.ndarray:
+    """Mirrors `BlazeFaceFullRangeAnchors.GRID_192`: a single 48x48x1 grid (stride 4) -> 2304."""
+    out: List[Tuple[float, float]] = []
+    grid_size = 48
+    for y in range(grid_size):
+        for x in range(grid_size):
+            cx = (x + 0.5) / grid_size
+            cy = (y + 0.5) / grid_size
+            out.append((cx, cy))
+    arr = np.asarray(out, dtype=np.float32)
+    assert arr.shape == (BLAZEFACE_FR_NUM_ANCHORS, 2), arr.shape
+    return arr
+
+
+def _generate_blazeface_anchors() -> np.ndarray:
+    """Backward-compat alias: the short-range anchor table."""
+    return _generate_blazeface_anchors_short_range()
 
 
 def _sigmoid_np(x: np.ndarray) -> np.ndarray:
@@ -207,9 +240,17 @@ def _build_blazeface_interp(path: Path) -> tf.lite.Interpreter:
     return interp
 
 
-def _resolve_blazeface_output_indices(interp: tf.lite.Interpreter) -> Tuple[int, int]:
-    """Return (regressors_idx, classifications_idx) into get_output_details(),
-    using name-based lookup with a shape-based fallback."""
+def _resolve_blazeface_output_indices(
+    interp: tf.lite.Interpreter,
+    reg_stride: int = BLAZEFACE_SR_REG_STRIDE,
+) -> Tuple[int, int]:
+    """Return (regressors_idx, classifications_idx) into get_output_details().
+
+    Name-based lookup with a shape-based fallback. Both BlazeFace variants
+    name their outputs with substrings 'reg' and 'class'/'classif' (e.g. the
+    short-range model exports `regressors` / `classificators`, the full-range
+    model exports `reshaped_regressor_face_4` / `reshaped_classifier_face_4`).
+    """
     out = interp.get_output_details()
     reg_idx = next((i for i, o in enumerate(out) if "reg" in o["name"].lower()), None)
     cls_idx = next(
@@ -219,7 +260,7 @@ def _resolve_blazeface_output_indices(interp: tf.lite.Interpreter) -> Tuple[int,
     if reg_idx is None or cls_idx is None:
         for i, o in enumerate(out):
             tail = int(o["shape"][-1])
-            if tail == BLAZEFACE_REG_STRIDE and reg_idx is None:
+            if tail == reg_stride and reg_idx is None:
                 reg_idx = i
             elif tail == 1 and cls_idx is None:
                 cls_idx = i
@@ -232,16 +273,34 @@ def _resolve_blazeface_output_indices(interp: tf.lite.Interpreter) -> Tuple[int,
 def _run_blazeface(
     interp: tf.lite.Interpreter,
     rgb_arr: np.ndarray,
+    variant: str = DETECTOR_VARIANT_SHORT_RANGE,
     score_threshold: float = BLAZEFACE_DEFAULT_SCORE_THRESHOLD,
     iou_threshold: float = BLAZEFACE_NMS_IOU_THRESHOLD,
 ) -> List[Dict]:
-    """Run BlazeFace short-range over `rgb_arr` (HxWx3 uint8 RGB).
+    """Run BlazeFace over `rgb_arr` (HxWx3 uint8 RGB), dispatching on variant.
 
     Returns a list of detected faces (post-NMS) in source pixel coordinates.
     Each face dict has keys: bbox=(l,t,r,b), landmarks={name:(x,y)}, score.
+
+    Mirrors the per-variant detectors `BlazeFaceShortRangeDetector` /
+    `BlazeFaceFullRangeDetector` on the Android side -- same input size, same
+    anchor table, same regressor unpacking, same letterbox + [-1,1] norm.
     """
+    if variant == DETECTOR_VARIANT_SHORT_RANGE:
+        input_size = BLAZEFACE_SR_INPUT_SIZE
+        num_anchors = BLAZEFACE_SR_NUM_ANCHORS
+        reg_stride = BLAZEFACE_SR_REG_STRIDE
+        anchors = _generate_blazeface_anchors_short_range()
+    elif variant == DETECTOR_VARIANT_FULL_RANGE:
+        input_size = BLAZEFACE_FR_INPUT_SIZE
+        num_anchors = BLAZEFACE_FR_NUM_ANCHORS
+        reg_stride = BLAZEFACE_FR_REG_STRIDE
+        anchors = _generate_blazeface_anchors_full_range()
+    else:
+        raise ValueError(f"unknown detector variant {variant!r}; use one of {DETECTOR_VARIANTS}")
+
     src_h, src_w = rgb_arr.shape[:2]
-    letterboxed, scale, pad_x, pad_y = _letterbox_to(rgb_arr, BLAZEFACE_INPUT_SIZE)
+    letterboxed, scale, pad_x, pad_y = _letterbox_to(rgb_arr, input_size)
     f = (letterboxed.astype(np.float32) - 127.5) / 127.5  # [-1, 1] like Kotlin
     nhwc = f[None, ...]
 
@@ -249,17 +308,21 @@ def _run_blazeface(
     interp.set_tensor(inp["index"], nhwc)
     interp.invoke()
 
-    reg_idx, cls_idx = _resolve_blazeface_output_indices(interp)
+    reg_idx, cls_idx = _resolve_blazeface_output_indices(interp, reg_stride)
     out = interp.get_output_details()
     regs = interp.get_tensor(out[reg_idx]["index"]).reshape(-1)
     cls = interp.get_tensor(out[cls_idx]["index"]).reshape(-1)
-    if regs.size != BLAZEFACE_NUM_ANCHORS * BLAZEFACE_REG_STRIDE:
-        raise RuntimeError(f"unexpected regressor size {regs.size}")
-    if cls.size != BLAZEFACE_NUM_ANCHORS:
-        raise RuntimeError(f"unexpected classifier size {cls.size}")
-    regs = regs.reshape(BLAZEFACE_NUM_ANCHORS, BLAZEFACE_REG_STRIDE)
+    if regs.size != num_anchors * reg_stride:
+        raise RuntimeError(
+            f"unexpected regressor size {regs.size}, expected {num_anchors * reg_stride} "
+            f"(variant={variant})"
+        )
+    if cls.size != num_anchors:
+        raise RuntimeError(
+            f"unexpected classifier size {cls.size}, expected {num_anchors} (variant={variant})"
+        )
+    regs = regs.reshape(num_anchors, reg_stride)
 
-    anchors = _generate_blazeface_anchors()
     scores = _sigmoid_np(cls)
     keep = scores >= score_threshold
 
@@ -272,9 +335,9 @@ def _run_blazeface(
     for i in np.where(keep)[0]:
         anchor_cx = float(anchors[i, 0])
         anchor_cy = float(anchors[i, 1])
-        # Box decode: same math as BlazeFaceDecoder.kt lines 70-78.
-        cx_input = anchor_cx * BLAZEFACE_INPUT_SIZE + float(regs[i, 0])
-        cy_input = anchor_cy * BLAZEFACE_INPUT_SIZE + float(regs[i, 1])
+        # Box decode: same math as BlazeFace*Decoder.kt.
+        cx_input = anchor_cx * input_size + float(regs[i, 0])
+        cy_input = anchor_cy * input_size + float(regs[i, 1])
         w_input = float(regs[i, 2])
         h_input = float(regs[i, 3])
 
@@ -297,8 +360,8 @@ def _run_blazeface(
         landmarks: Dict[str, Tuple[float, float]] = {}
         for li, nm in enumerate(LANDMARK_NAMES):
             base = 4 + li * 2
-            lx_input = anchor_cx * BLAZEFACE_INPUT_SIZE + float(regs[i, base])
-            ly_input = anchor_cy * BLAZEFACE_INPUT_SIZE + float(regs[i, base + 1])
+            lx_input = anchor_cx * input_size + float(regs[i, base])
+            ly_input = anchor_cy * input_size + float(regs[i, base + 1])
             lm_x, lm_y = to_src(lx_input, ly_input)
             lm_x = max(0.0, min(float(src_w), lm_x))
             lm_y = max(0.0, min(float(src_h), lm_y))
@@ -476,11 +539,49 @@ def detect_and_align_face(
     score_threshold: float = BLAZEFACE_DEFAULT_SCORE_THRESHOLD,
     max_long_edge: int = DECODE_MAX_LONG_EDGE,
     alignment_mode: str = ALIGNMENT_MODE_SIMILARITY,
+    detector_variant: str = DETECTOR_VARIANT_SHORT_RANGE,
 ) -> Tuple[Optional[np.ndarray], Dict]:
-    """Mirror the Android pipeline up to the embedder input.
+    """Mirror the Android pipeline up to the embedder input -- single highest-score face.
 
     Returns (aligned_face_uint8, info). On detection failure aligned_face is None
-    and info["reason"] tells you why.
+    and info["reason"] tells you why. For the multi-face flavour (the actual
+    Android `FaceProcessor.process` behaviour), use [detect_and_align_all_faces].
+    """
+    aligned_list, info = detect_and_align_all_faces(
+        path,
+        blazeface_interp,
+        score_threshold=score_threshold,
+        max_long_edge=max_long_edge,
+        alignment_mode=alignment_mode,
+        detector_variant=detector_variant,
+    )
+    if not aligned_list:
+        return None, info
+    # Pick the highest-score face for the single-face caller.
+    best_idx = int(np.argmax([f["score"] for f in info["faces"]]))
+    return aligned_list[best_idx], {
+        **info["faces"][best_idx],
+        "src_size": info["src_size"],
+        "n_detected": len(aligned_list),
+        "alignment_mode": alignment_mode,
+        "detector_variant": detector_variant,
+        "reason": "aligned",
+    }
+
+
+def detect_and_align_all_faces(
+    path: Path,
+    blazeface_interp: tf.lite.Interpreter,
+    score_threshold: float = BLAZEFACE_DEFAULT_SCORE_THRESHOLD,
+    max_long_edge: int = DECODE_MAX_LONG_EDGE,
+    alignment_mode: str = ALIGNMENT_MODE_SIMILARITY,
+    detector_variant: str = DETECTOR_VARIANT_SHORT_RANGE,
+) -> Tuple[List[np.ndarray], Dict]:
+    """Run the full Android pipeline (per FaceProcessor.process) for ALL faces.
+
+    Returns (aligned_face_list, info_dict). `info_dict["faces"]` is a list of
+    per-face dicts {bbox, landmarks, score} parallel to `aligned_face_list`.
+    Returns ([], info_dict) when no face survives detection.
     """
     img = Image.open(path).convert("RGB")
     img = ImageOps.exif_transpose(img)
@@ -493,25 +594,30 @@ def detect_and_align_face(
     rgb = np.asarray(img, dtype=np.uint8)
     h_src, w_src = rgb.shape[:2]
 
-    faces = _run_blazeface(blazeface_interp, rgb, score_threshold=score_threshold)
+    faces = _run_blazeface(
+        blazeface_interp,
+        rgb,
+        variant=detector_variant,
+        score_threshold=score_threshold,
+    )
     if not faces:
-        return None, {
+        return [], {
             "reason": "no_faces_detected",
             "src_size": (w_src, h_src),
             "score_threshold": score_threshold,
+            "detector_variant": detector_variant,
+            "faces": [],
         }
-    # Highest-confidence face wins, like Android's pickRepresentative does for
-    # the largest crop -- but here we have no crop areas yet, so use score.
-    face = max(faces, key=lambda f: f["score"])
-    aligned = _warp_to_arcface(rgb, face["landmarks"], mode=alignment_mode)
-    return aligned, {
+    aligned_list: List[np.ndarray] = [
+        _warp_to_arcface(rgb, f["landmarks"], mode=alignment_mode) for f in faces
+    ]
+    return aligned_list, {
         "reason": "aligned",
         "src_size": (w_src, h_src),
-        "bbox": face["bbox"],
-        "landmarks": face["landmarks"],
-        "score": face["score"],
         "n_detected": len(faces),
         "alignment_mode": alignment_mode,
+        "detector_variant": detector_variant,
+        "faces": faces,
     }
 
 
@@ -643,6 +749,15 @@ def main(argv: Sequence[str]) -> int:
              "or 'perspective' (8-DOF, mirrors Android's setPolyToPoly(4); diagnostic only).",
     )
     p.add_argument(
+        "--detector-variant",
+        choices=DETECTOR_VARIANTS,
+        default=DETECTOR_VARIANT_SHORT_RANGE,
+        help="BlazeFace variant: 'short_range' (128x128, 896 anchors; matches "
+             "face_detection_short_range.tflite) or 'full_range' (192x192, 2304 anchors; "
+             "matches face_detection_full_range.tflite). Pass --blazeface-tflite alongside "
+             "to point at the matching model file.",
+    )
+    p.add_argument(
         "--save-aligned-dir",
         type=Path,
         default=None,
@@ -677,6 +792,7 @@ def main(argv: Sequence[str]) -> int:
                 blaze_interp,
                 score_threshold=args.blazeface_score_threshold,
                 alignment_mode=args.alignment_mode,
+                detector_variant=args.detector_variant,
             )
             if aligned is None:
                 print(f"   ! skip {path.name}: {info.get('reason')} (src={info.get('src_size')})")
