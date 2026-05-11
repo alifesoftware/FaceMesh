@@ -4,6 +4,7 @@ import android.net.Uri
 import android.os.SystemClock
 import android.util.Log
 import com.alifesoftware.facemesh.domain.model.Cluster
+import com.alifesoftware.facemesh.ml.cluster.EmbeddingMath
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
@@ -112,6 +113,74 @@ class ClusterRepository(private val dao: ClusterDao) {
         Log.w(TAG, "deleteAll: wiping ALL clusters (Reset flow)")
         dao.deleteAllClusters()
         Log.i(TAG, "deleteAll: completed in ${SystemClock.elapsedRealtime() - started}ms")
+    }
+
+    /**
+     * Returns persisted clusters with centroids, ordered like [ClusterDao.getAllClusters]
+     * (oldest-first by [ClusterEntity.createdAt]) for deterministic merge logs.
+     */
+    suspend fun loadPersistedClustersForIncrementalMerge(): List<Pair<String, FloatArray>> {
+        val started = SystemClock.elapsedRealtime()
+        val rows = dao.getAllClusters()
+        val out = rows.map { it.id to it.centroid.clone() }
+        Log.i(
+            TAG,
+            "loadPersistedClustersForIncrementalMerge: n=${out.size} " +
+                "took=${SystemClock.elapsedRealtime() - started}ms dim=${rows.firstOrNull()?.centroid?.size ?: 0}",
+        )
+        return out
+    }
+
+    /**
+     * Appends [newFaces] to [clusterId], recomputes the centroid over **all** stored embeddings,
+     * bumps [ClusterEntity.faceCount], and persists. Representative URI and name unchanged.
+     *
+     * @return Domain [Cluster] after update, or `null` if [clusterId] is unknown.
+     */
+    suspend fun appendFacesAndRecomputeCentroid(
+        clusterId: String,
+        newFaces: List<ClusterImageEntity>,
+    ): Cluster? {
+        if (newFaces.isEmpty()) {
+            Log.w(TAG, "appendFacesAndRecomputeCentroid: id=$clusterId early return (newFaces empty)")
+            return null
+        }
+        val started = SystemClock.elapsedRealtime()
+        val header = dao.findById(clusterId)
+        if (header == null) {
+            Log.w(TAG, "appendFacesAndRecomputeCentroid: id=$clusterId NOT FOUND -> null")
+            return null
+        }
+        val existing = dao.getImagesForCluster(clusterId)
+        val embeddings = ArrayList<FloatArray>(existing.size + newFaces.size)
+        for (r in existing) embeddings += r.embedding
+        for (r in newFaces) embeddings += r.embedding
+        val centroid = EmbeddingMath.meanAndNormalize(embeddings)
+        Log.i(
+            TAG,
+            "appendFacesAndRecomputeCentroid: id=$clusterId prevFaces=${existing.size} " +
+                "adding=${newFaces.size} total=${embeddings.size} dim=${centroid.size}",
+        )
+        val updated = ClusterEntity(
+            id = header.id,
+            centroid = centroid,
+            representativeImageUri = header.representativeImageUri,
+            faceCount = embeddings.size,
+            createdAt = header.createdAt,
+            name = header.name,
+        )
+        dao.saveClusterWithImages(cluster = updated, images = newFaces)
+        val domain = Cluster(
+            id = updated.id,
+            representativeImageUri = Uri.parse(updated.representativeImageUri),
+            faceCount = updated.faceCount,
+            name = updated.name,
+        )
+        Log.i(
+            TAG,
+            "appendFacesAndRecomputeCentroid: id=$clusterId done in ${SystemClock.elapsedRealtime() - started}ms",
+        )
+        return domain
     }
 
     private fun ClusterEntity.toDomain(): Cluster = Cluster(

@@ -63,7 +63,11 @@
 
     <!-- Settings: Pipeline tuning sliders -->
     <string name="settings_section_pipeline">Pipeline tuning</string>
-    <string name="settings_pipeline_section_caption">Override the manifest values for cluster tightness and match strictness. Reset returns each value to the manifest default.</string>
+    <string name="settings_pipeline_section_caption">Override the manifest values for cluster tightness and match strictness. Reset returns each value to the manifest default. Match strictness also applies to optional merge-into-saved Clusterify mode.</string>
+    <string name="settings_clusterify_persistence_title">Clusterify and existing clusters</string>
+    <string name="settings_clusterify_persistence_subtitle">Default clusters only the photos in the current pick. Enable merge to attach matching faces to clusters you already saved (uses match strictness vs centroids; leftovers are still grouped with DBSCAN).</string>
+    <string name="settings_clusterify_segment_batch_only">Current pick only</string>
+    <string name="settings_clusterify_segment_merge_saved">Merge into saved</string>
     <string name="settings_dbscan_eps_title">Cluster tightness</string>
     <string name="settings_dbscan_eps_subtitle">Lower values produce tighter clusters (more "same person" splits). Higher values merge faces more eagerly.</string>
     <string name="settings_match_threshold_title">Match strictness</string>

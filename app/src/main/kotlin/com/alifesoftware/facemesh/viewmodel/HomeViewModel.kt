@@ -249,7 +249,7 @@ class HomeViewModel(
                     ClusterifyUseCase.Event.NoFaces ->
                         handle(HomeIntent.ClusterifyNoFaces)
                     is ClusterifyUseCase.Event.Done ->
-                        handle(HomeIntent.ClusterifyFinished(event.clusters))
+                        finishClusterify(event.clusters)
                 }
             }
             Log.i(
@@ -339,12 +339,23 @@ class HomeViewModel(
         }
     }
 
-    private fun finishClusterify(clusters: List<Cluster>) {
-        Log.i(TAG, "finishClusterify: producing Clustered with ${clusters.size} cluster(s)")
-        transition("Clusterify/finished", HomeUiState.Clustered(
-            clusters = clusters,
-            selectedClusterIds = emptySet(),
-        ))
+    private fun finishClusterify(resultFromRun: List<Cluster>) {
+        Log.i(TAG, "finishClusterify: run reported ${resultFromRun.size} cluster(s); reloading from DB")
+        viewModelScope.launch {
+            val clusters = clusterRepository?.loadClusters() ?: resultFromRun
+            _clusterImages.update { emptyMap() }
+            Log.i(
+                TAG,
+                "finishClusterify: ui clusters=${clusters.size} (repo=${clusterRepository != null})",
+            )
+            transition(
+                "Clusterify/finished",
+                HomeUiState.Clustered(
+                    clusters = clusters,
+                    selectedClusterIds = emptySet(),
+                ),
+            )
+        }
     }
 
     private fun handleNoFaces() {

@@ -454,19 +454,31 @@ sequenceDiagram
         FP-->>UC: List<FaceRecord>
         UC-->>UI: Event.Progress(i, total)
     end
-    UC->>DB: run(allEmbeddings)
+    alt incremental merge pref ON and DB has clusters
+        UC->>Repo: loadPersistedClustersForIncrementalMerge
+        Repo-->>UC: (id, centroid)[]
+        UC->>UC: assign faces: dot ≥ matchThreshold,<br/>margin vs runner-up cluster
+        loop matched per id
+            UC->>Repo: appendFacesAndRecomputeCentroid
+        end
+        UC->>DB: run(embeddings_subset = leftovers only)
+    else legacy batch Clusterify (default pref)
+        UC->>DB: run(allEmbeddings)
+    end
     DB-->>UC: labels[]
     UC->>UC: group by label, drop NOISE
-    loop for each cluster
+    loop for each new cluster group
         UC->>UC: centroid = mean+L2(members.embedding)
         UC->>UC: rep = pickRepresentative(members)
         UC->>UC: save thumbnail PNG to filesDir
         UC->>Repo: saveCluster(cluster, centroid, members)
     end
-    UC-->>UI: Event.Done(clusters)
+    UC-->>UI: Event.Done(updated + new)
 ```
 
 `pickRepresentative` chooses the member with the largest natural display crop (largest face = closest to camera = most recognisable thumbnail). The centroid is `meanAndNormalize` over the cluster's L2-normed embeddings — already-unit vectors averaged then re-normalised, which is a cheap proxy for the geodesic mean on the unit sphere.
+
+**Incremental merge (Settings → “Merge into saved”)** is off by default. When on, each face from the current pick is compared to **every persisted centroid** using the same effective **match strictness** as Filter (`AppPreferences.matchThreshold`). If the best centroid wins by at least `PipelineConfig.IncrementalClusterify.centroidAssignmentAmbiguityMargin` over the runner-up *different* cluster, the face is appended to that cluster and the stored centroid is recomputed over all member embeddings; otherwise the face is treated as *leftover* and falls through to DBSCAN with the usual `eps` / `minPts`. No match below threshold also goes to DBSCAN. First launch with an empty DB behaves like legacy mode.
 
 ---
 
@@ -595,6 +607,8 @@ The `Source` is logged on every Clusterify / Filter run so the diagnostic log st
 | `Clustering.defaultEps` | 0.50 | User pref | Tighter clusters, more splits | Looser clusters, more merges |
 | `Clustering.defaultMinPts` | 2 | Manifest/config | minPts=1 trivialises DBSCAN | Single-photo people drop as noise |
 | `Match.defaultThreshold` | 0.65 | User pref | More keepers (recall ↑, precision ↓) | Fewer keepers (precision ↑, recall ↓) |
+| `incrementalClusterMergeIntoExisting` | `false` | User pref (Settings) | Legacy: DBSCAN on full batch only | Experimental: centroid-merge into saved clusters first |
+| `IncrementalClusterify.centroidAssignmentAmbiguityMargin` | 0.03 | Compile-time | More aggressive merges | Stricter: near-ties go to DBSCAN |
 
 ---
 
@@ -628,7 +642,7 @@ flowchart LR
 
 ## 12. Persistence
 
-After Clusterify, each cluster is persisted via `ClusterRepository.saveCluster`:
+After Clusterify, each cluster is persisted via `ClusterRepository.saveCluster` (new UUID rows). Incremental merge **updates** existing `cluster` rows via `appendFacesAndRecomputeCentroid` (recomputed centroid + appended `cluster_image` rows; representative URI unchanged).
 
 | Table | Row | Notes |
 |-------|-----|-------|

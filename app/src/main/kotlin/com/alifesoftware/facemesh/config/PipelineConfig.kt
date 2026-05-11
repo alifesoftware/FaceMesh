@@ -568,4 +568,29 @@ object PipelineConfig {
         const val minThreshold: Float = 0.30f
         const val maxThreshold: Float = 0.95f
     }
+
+    // ---------------------------------------------------------------------------------------
+    // Incremental Clusterify (optional centroid merge before DBSCAN on leftovers)
+    // ---------------------------------------------------------------------------------------
+
+    /**
+     * When [com.alifesoftware.facemesh.data.AppPreferences.incrementalClusterMergeIntoExisting]
+     * is enabled and the DB already has clusters, Clusterify centroid-matches faces from the
+     * current pick into persisted clusters **before** running DBSCAN only on leftovers.
+     */
+    object IncrementalClusterify {
+        /**
+         * Runner-up centroid must trail the winner by at least this cosine-similarity margin
+         * or the assignment is treated as ambiguous and the face is left for DBSCAN.
+         *
+         *   - Class:    TUNABLE HEURISTIC
+         *   - Used by:  `ClusterifyUseCase` incremental branch
+         *   - Range:    0..0.2
+         *   - Lower:    more merges, higher wrong-person collision risk among similar relatives.
+         *   - Higher:   fewer merges, more orphans fall through to standalone DBSCAN.
+         *   - Why 0.03: small enough to unblock common pose/lighting jitter; large enough that
+         *               two plausible centroids separated by rounding noise rarely commit.
+         */
+        const val centroidAssignmentAmbiguityMargin: Float = 0.03f
+    }
 }

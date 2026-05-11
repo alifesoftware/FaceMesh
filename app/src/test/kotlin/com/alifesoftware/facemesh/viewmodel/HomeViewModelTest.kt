@@ -136,6 +136,7 @@ class HomeViewModelTest {
         val vm = HomeViewModel()
         val injected = listOf(Cluster(id = "x", representativeImageUri = photo1, faceCount = 3))
         vm.handle(HomeIntent.ClusterifyFinished(injected))
+        advanceUntilIdle()
         val s = vm.state.value as HomeUiState.Clustered
         assertEquals(1, s.clusters.size)
         assertEquals("x", s.clusters.first().id)

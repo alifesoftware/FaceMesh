@@ -77,6 +77,10 @@ fun SettingsScreen(
         initialValue = PipelineConfig.Detector.defaultVariant,
     )
 
+    val incrementalMergeIntoExisting by viewModel.incrementalMergeIntoExisting.collectAsStateWithLifecycle(
+        initialValue = false,
+    )
+
     DisposableEffect(Unit) {
         Log.i(
             SCREEN_TAG,
@@ -183,6 +187,11 @@ fun SettingsScreen(
                 onReset = { viewModel.resetMatchThresholdUserOverride() },
             )
 
+            ClusterifyPersistenceSection(
+                incrementalMergeEnabled = incrementalMergeIntoExisting,
+                onIncrementalMergeChange = { viewModel.setIncrementalMergeIntoExisting(it) },
+            )
+
             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
 
             // -------- Face detection model section --------
@@ -271,6 +280,50 @@ private fun snapToStep(raw: Float, bounds: SettingsViewModel.Bounds): Float {
     if (bounds.step <= 0f) return raw
     val snapped = bounds.min + ((raw - bounds.min) / bounds.step).toInt() * bounds.step
     return snapped.coerceIn(bounds.min, bounds.max)
+}
+
+@Composable
+private fun ClusterifyPersistenceSection(
+    incrementalMergeEnabled: Boolean,
+    onIncrementalMergeChange: (Boolean) -> Unit,
+) {
+    Text(
+        text = stringResource(R.string.settings_clusterify_persistence_title),
+        style = MaterialTheme.typography.labelLarge,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+    )
+    Text(
+        text = stringResource(R.string.settings_clusterify_persistence_subtitle),
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+    )
+    val options = listOf(
+        false to R.string.settings_clusterify_segment_batch_only,
+        true to R.string.settings_clusterify_segment_merge_saved,
+    )
+    SingleChoiceSegmentedButtonRow(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+    ) {
+        options.forEachIndexed { index, (incremental, labelRes) ->
+            SegmentedButton(
+                selected = incrementalMergeEnabled == incremental,
+                onClick = {
+                    Log.i(
+                        SCREEN_TAG,
+                        "segmented: clusterifyPersistence incrementalMerge=$incremental",
+                    )
+                    onIncrementalMergeChange(incremental)
+                },
+                shape = SegmentedButtonDefaults.itemShape(index = index, count = options.size),
+            ) {
+                Text(stringResource(labelRes))
+            }
+        }
+    }
 }
 
 @Composable

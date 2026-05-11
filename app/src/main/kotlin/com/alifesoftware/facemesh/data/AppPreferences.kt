@@ -130,6 +130,17 @@ class AppPreferences(private val context: Context) {
         .observed("detectorVariant")
 
     /**
+     * Experimental Clusterify behaviour: centroid-match embeddings from the **current batch**
+     * into **already persisted** clusters (then DBSCAN leftovers only).
+     *
+     * Default **false**: each Clusterify tap groups only this batch → new UUID cluster rows
+     * (historic app behaviour).
+     */
+    val incrementalClusterMergeIntoExisting: Flow<Boolean> = context.dataStore.data
+        .map { it[KEY_INCREMENTAL_MERGE_CLUSTERIFY] ?: false }
+        .observed("incrementalClusterMergeIntoExisting")
+
+    /**
      * Manifest path: writes the manifest-supplied value into DataStore. Does NOT clear any
      * existing user override - the override always wins at read time.
      */
@@ -203,6 +214,11 @@ class AppPreferences(private val context: Context) {
         context.dataStore.edit { it[KEY_DETECTOR_VARIANT] = value.name }
     }
 
+    suspend fun setIncrementalClusterMergeIntoExisting(value: Boolean) {
+        Log.i(TAG, "set incrementalClusterMergeIntoExisting=$value")
+        context.dataStore.edit { it[KEY_INCREMENTAL_MERGE_CLUSTERIFY] = value }
+    }
+
     suspend fun clearAll() {
         Log.w(TAG, "clearAll: wiping ALL preferences (Reset flow)")
         context.dataStore.edit { it.clear() }
@@ -251,5 +267,7 @@ class AppPreferences(private val context: Context) {
         private val KEY_GPU_FALLBACK_TOAST_SHOWN = booleanPreferencesKey("gpu_fallback_toast_shown")
         private val KEY_DYNAMIC_COLOR_ENABLED = booleanPreferencesKey("dynamic_color_enabled")
         private val KEY_DETECTOR_VARIANT = stringPreferencesKey("detector_variant")
+        private val KEY_INCREMENTAL_MERGE_CLUSTERIFY =
+            booleanPreferencesKey("incremental_merge_clusterify")
     }
 }

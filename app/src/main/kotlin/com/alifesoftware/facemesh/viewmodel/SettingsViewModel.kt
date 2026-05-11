@@ -48,6 +48,9 @@ class SettingsViewModel(
     /** Active BlazeFace detector variant; drives the SegmentedButton selection in Settings. */
     val detectorVariant: Flow<DetectorVariant> = preferences.detectorVariant
 
+    /** Experimental: centroid-merge Clusterify batches into persisted clusters before DBSCAN. */
+    val incrementalMergeIntoExisting: Flow<Boolean> = preferences.incrementalClusterMergeIntoExisting
+
     /**
      * Slider bounds + step come straight from [PipelineConfig] so the UI is the single source
      * of consistency with the underlying algorithms' valid input ranges.
@@ -104,6 +107,11 @@ class SettingsViewModel(
     fun setDetectorVariant(value: DetectorVariant) {
         Log.i(TAG, "setDetectorVariant: user picked $value")
         viewModelScope.launch { preferences.setDetectorVariant(value) }
+    }
+
+    fun setIncrementalMergeIntoExisting(value: Boolean) {
+        Log.i(TAG, "setIncrementalMergeIntoExisting: user toggled -> $value")
+        viewModelScope.launch { preferences.setIncrementalClusterMergeIntoExisting(value) }
     }
 
     /** Slider configuration shape for [SettingsScreen] consumption. */
