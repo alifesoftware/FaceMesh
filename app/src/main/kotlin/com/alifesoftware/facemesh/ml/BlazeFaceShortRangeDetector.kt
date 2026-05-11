@@ -105,8 +105,18 @@ class BlazeFaceShortRangeDetector(
             Log.e(TAG, "detect: source bitmap is RECYCLED; cannot run detection")
             return emptyList()
         }
+
+        val scale = minOf(
+            inputSize.toFloat() / source.width,
+            inputSize.toFloat() / source.height,
+        )
+        val scaledW = source.width * scale
+        val scaledH = source.height * scale
+        val padX = (inputSize - scaledW) / 2f
+        val padY = (inputSize - scaledH) / 2f
+
         val prepStart = SystemClock.elapsedRealtime()
-        prepareInput(source)
+        prepareInput(source, scale, padX, padY)
         val prepMs = SystemClock.elapsedRealtime() - prepStart
         Log.i(TAG, "detect: prepareInput done in ${prepMs}ms; bound output buffers and submitting to interpreter")
 
@@ -170,7 +180,7 @@ class BlazeFaceShortRangeDetector(
         }
 
         val decodeStart = SystemClock.elapsedRealtime()
-        val faces = decoder.decode(regs, cls, source.width, source.height)
+        val faces = decoder.decode(regs, cls, source.width, source.height, scale, padX, padY)
         val decodeMs = SystemClock.elapsedRealtime() - decodeStart
         Log.i(
             TAG,
@@ -181,16 +191,10 @@ class BlazeFaceShortRangeDetector(
         return faces
     }
 
-    private fun prepareInput(source: Bitmap) {
+    private fun prepareInput(source: Bitmap, scale: Float, padX: Float, padY: Float) {
         // Letterbox-resize to inputSize\u00d7inputSize on a temporary bitmap.
-        val scale = minOf(
-            inputSize.toFloat() / source.width,
-            inputSize.toFloat() / source.height,
-        )
         val scaledW = source.width * scale
         val scaledH = source.height * scale
-        val padX = (inputSize - scaledW) / 2f
-        val padY = (inputSize - scaledH) / 2f
         Log.i(
             TAG,
             "prepareInput: letterbox scale=${"%.4f".format(scale)} " +

@@ -38,6 +38,12 @@ class BlazeFaceFullRangeDecoder(
         classifications: FloatArray,
         sourceWidth: Int,
         sourceHeight: Int,
+        scale: Float = minOf(
+            inputSize.toFloat() / sourceWidth,
+            inputSize.toFloat() / sourceHeight,
+        ),
+        padX: Float = (inputSize - sourceWidth * scale) / 2f,
+        padY: Float = (inputSize - sourceHeight * scale) / 2f,
     ): List<DetectedFace> {
         require(regressors.size == anchors.size * PipelineConfig.Detector.FullRange.regStride) {
             "regressors size ${regressors.size} != ${anchors.size * PipelineConfig.Detector.FullRange.regStride}"
@@ -47,8 +53,6 @@ class BlazeFaceFullRangeDecoder(
         }
 
         val candidates = ArrayList<DetectedFace>(32)
-        val sx = sourceWidth.toFloat() / inputSize
-        val sy = sourceHeight.toFloat() / inputSize
 
         var droppedLowScore = 0
         var droppedDegenerate = 0
@@ -74,10 +78,10 @@ class BlazeFaceFullRangeDecoder(
             val w = regressors[base + 2]
             val h = regressors[base + 3]
 
-            val left = (cx - w / 2f) * sx
-            val top = (cy - h / 2f) * sy
-            val right = (cx + w / 2f) * sx
-            val bottom = (cy + h / 2f) * sy
+            val left = (cx - w / 2f - padX) / scale
+            val top = (cy - h / 2f - padY) / scale
+            val right = (cx + w / 2f - padX) / scale
+            val bottom = (cy + h / 2f - padY) / scale
 
             val rect = RectF(
                 left.coerceIn(0f, sourceWidth.toFloat()),
@@ -96,12 +100,12 @@ class BlazeFaceFullRangeDecoder(
             }
 
             val landmarks = FaceLandmarks(
-                rightEye = readLandmark(regressors, base + 4, anchor, sx, sy, sourceWidth, sourceHeight),
-                leftEye = readLandmark(regressors, base + 6, anchor, sx, sy, sourceWidth, sourceHeight),
-                noseTip = readLandmark(regressors, base + 8, anchor, sx, sy, sourceWidth, sourceHeight),
-                mouthCenter = readLandmark(regressors, base + 10, anchor, sx, sy, sourceWidth, sourceHeight),
-                rightEarTragion = readLandmark(regressors, base + 12, anchor, sx, sy, sourceWidth, sourceHeight),
-                leftEarTragion = readLandmark(regressors, base + 14, anchor, sx, sy, sourceWidth, sourceHeight),
+                rightEye = readLandmark(regressors, base + 4, anchor, scale, padX, padY, sourceWidth, sourceHeight),
+                leftEye = readLandmark(regressors, base + 6, anchor, scale, padX, padY, sourceWidth, sourceHeight),
+                noseTip = readLandmark(regressors, base + 8, anchor, scale, padX, padY, sourceWidth, sourceHeight),
+                mouthCenter = readLandmark(regressors, base + 10, anchor, scale, padX, padY, sourceWidth, sourceHeight),
+                rightEarTragion = readLandmark(regressors, base + 12, anchor, scale, padX, padY, sourceWidth, sourceHeight),
+                leftEarTragion = readLandmark(regressors, base + 14, anchor, scale, padX, padY, sourceWidth, sourceHeight),
             )
             Log.i(
                 TAG,
@@ -131,13 +135,14 @@ class BlazeFaceFullRangeDecoder(
         reg: FloatArray,
         offset: Int,
         anchor: BlazeFaceFullRangeAnchors.Anchor,
-        sx: Float,
-        sy: Float,
+        scale: Float,
+        padX: Float,
+        padY: Float,
         srcW: Int,
         srcH: Int,
     ): PointF {
-        val px = (anchor.cx + reg[offset] / inputSize) * inputSize * sx
-        val py = (anchor.cy + reg[offset + 1] / inputSize) * inputSize * sy
+        val px = ((anchor.cx + reg[offset] / inputSize) * inputSize - padX) / scale
+        val py = ((anchor.cy + reg[offset + 1] / inputSize) * inputSize - padY) / scale
         return PointF(px.coerceIn(0f, srcW.toFloat()), py.coerceIn(0f, srcH.toFloat()))
     }
 
